@@ -3,10 +3,18 @@
   "name": "reef",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-15",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: required by workers-oauth-provider for Client ID Metadata
+  // Documents, so a client-supplied metadata URL can never reach internal addresses.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "routes": [{ "pattern": "reef.cobular.com", "custom_domain": true }],
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
   // Logs never include request headers or bodies (see DESIGN.md, "What the operator can see").
+  // Invocation logs are off because they record request metadata; the worker emits its own
+  // structured events via src/lib-log.ts, which drops anything key-, token- or header-shaped.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": false }
+  },
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "SIGNUP_MODE": "invite",
@@ -17,10 +25,11 @@
     {
       "binding": "DB",
       "database_name": "reef",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "0c3aeb8d-9236-419e-8ef9-426057fa1595",
       "migrations_dir": "migrations"
     }
   ],
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }]
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "2f2f246f111e48a699e356b7f800f0ad" }]
   // Secrets (wrangler secret put): GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, TOKEN_SIGNING_KEY, COOKIE_SECRET
+  // Their types are declared in src/env.d.ts so typegen output does not depend on a local .dev.vars.
 }

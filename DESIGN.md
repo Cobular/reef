@@ -276,18 +276,20 @@ Five endpoints on the Worker's own domain move the bytes. Each is authorised by 
 
 ### Large-file script
 
-`create_upload` returns this for files over 90 MiB. It is a sketch and has not been run yet. A Python standard-library version covers environments without `dd`.
+`create_upload` returns this for files over 90 MiB, with the values filled in (`src/files/commands.ts`). Each part is copied to a temp file so curl sends a real `Content-Length` and can retry it. A Python standard-library version covers environments without `dd`.
 
 ```bash
-F=<file>; KEY=<key>; U=https://reef.cobular.com/up/<token>
-P=94371840
-SIZE=$(wc -c < "$F"); N=$(( (SIZE + P - 1) / P ))
-for i in $(seq 1 "$N"); do
-  LEN=$(( i < N ? P : SIZE - P * (N - 1) ))
-  dd if="$F" bs=1048576 skip=$(( (i - 1) * 90 )) count=90 2>/dev/null |
-    curl -sf -T - -H "Content-Length: $LEN" -H "X-Key: $KEY" "$U/$i" || exit 1
+(F='<file>'; KEY='<key>'; U='https://reef.cobular.com/up/<token>'
+SIZE=<bytes>; N=<parts>
+[ "$(wc -c < "$F" | tr -d ' ')" = "$SIZE" ] || { echo "$F is not $SIZE bytes" >&2; exit 1; }
+T=$(mktemp) || exit 1; trap 'rm -f "$T"' EXIT
+i=1
+while [ "$i" -le "$N" ]; do
+  dd if="$F" of="$T" bs=1048576 skip=$(( (i - 1) * 90 )) count=90 2>/dev/null || exit 1
+  curl -sS --fail-with-body --retry 3 -T "$T" -H "X-Key: $KEY" "$U/$i" || exit 1
+  i=$((i + 1))
 done
-curl -sf -X POST -H "X-Key: $KEY" "$U/complete"
+curl -sS --fail-with-body -X POST -H "X-Key: $KEY" "$U/complete")
 ```
 
 ## Portal
