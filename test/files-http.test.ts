@@ -153,7 +153,7 @@ describe("single upload", () => {
         duplex: "half",
       }),
     );
-    expect(res.status).toBe(413);
+    expect(res.status).toBe(400);
     expect((await fileRow(up.file.id))?.state).toBe("pending");
   });
 

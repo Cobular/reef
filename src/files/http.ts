@@ -3,7 +3,7 @@ import { text } from "../lib/http";
 import { logError, logEvent } from "../lib/log";
 import { utc } from "./commands";
 import { parseKey } from "./key";
-import { type LengthGuard, limitBody, newLengthGuard } from "./limit-stream";
+import { fixedLengthBody } from "./limit-stream";
 import { parseRange } from "./range";
 import {
   canAccess,
@@ -101,11 +101,9 @@ function checkContentLength(request: Request, expected: number): void {
     throw new ReefError(400, `Body is ${length} bytes; expected ${expected} bytes.`);
 }
 
-function lengthFailure(guard: LengthGuard, error: unknown): never {
-  if (guard.overflow)
-    throw new ReefError(413, `Body is larger than declared: expected ${guard.expected} bytes.`);
-  if (guard.underflow)
-    throw new ReefError(400, `Body ended early: expected ${guard.expected} bytes.`);
+function lengthFailure(expected: number, error: unknown): never {
+  if (error instanceof Error && /length|stream|closed|aborted|lost/i.test(error.message))
+    throw new ReefError(400, `Body did not match the declared size of ${expected} bytes.`);
   throw error;
 }
 
@@ -137,15 +135,14 @@ async function uploadWhole(request: Request, ctx: FilesContext, token: string) {
       `This file uploads in parts: PUT ${publicOrigin(ctx.env)}/up/<token>/<n>.`,
     );
   checkContentLength(request, file.size);
-  const guard = newLengthGuard(file.size);
   try {
     await ctx.storage.put(
       file.id,
-      file.size === 0 ? new ArrayBuffer(0) : limitBody(request.body, guard),
+      file.size === 0 ? new ArrayBuffer(0) : fixedLengthBody(request.body, file.size),
       key,
     );
   } catch (error) {
-    lengthFailure(guard, error);
+    lengthFailure(file.size, error);
   }
   return finish(ctx, file);
 }
@@ -161,19 +158,18 @@ async function uploadPart(request: Request, ctx: FilesContext, token: string, pa
   if (n < 1 || n > total) throw new ReefError(400, `Part number must be 1 to ${total}.`);
   const expected = n < total ? ctx.partSize : file.size - ctx.partSize * (total - 1);
   checkContentLength(request, expected);
-  const guard = newLengthGuard(expected);
   let etag: string;
   try {
     etag = await ctx.storage.uploadPart(
       file.id,
       file.r2_upload_id,
       n,
-      limitBody(request.body, guard),
+      fixedLengthBody(request.body, expected),
       key,
     );
   } catch (error) {
     if (error instanceof WrongKeyError) throw error;
-    lengthFailure(guard, error);
+    lengthFailure(expected, error);
   }
   await recordPart(ctx.env.DB, file.id, n, etag, ctx.now);
   return text(200, `Part ${n} of ${total} received.`);

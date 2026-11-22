@@ -465,6 +465,14 @@ Eight assumptions are unverified. The first three could change the design, so th
 | 7 | A custom Claude Code channel is usable day to day | Load a stub channel with the development flag | Keep local sessions on polling |
 | 8 | OpenAI's agents complete Reef's OAuth sign-in, and Codex cloud can use MCP servers at all | Connect ChatGPT, Codex CLI and Codex cloud to a stub, then upload a small file from each | List which agents are tools-only in the setup table |
 
+### Results so far
+
+Measured on the production Worker on 22 November 2026.
+
+- Risk 2 holds. Streaming bytes stays in the runtime's native code: a 90 MiB part costs about 5 ms of CPU and a 95 MiB download about 4 ms. A JavaScript `TransformStream` on the body cost about 1,400 ms per part, so upload and download bodies must never pass through JavaScript.
+- Risk 3 holds. SSE-C works for single PUTs, multipart uploads and ranged reads. A wrong key returns 403 on both kinds of object.
+- MCP tool calls cost 5 to 35 ms of CPU each, which is over the 10 ms free limit at the top end. Watch this; caching the MCP server between requests is the first thing to try.
+
 ### Settled questions
 
 All five were answered in review comments on 22 November 2026. The answers are folded into the sections above.
