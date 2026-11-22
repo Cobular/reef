@@ -62,7 +62,7 @@ These were settled in the design discussion and in review comments on 22 Novembe
 | Lifetime | Default 10 minutes, maximum 30 | Short residence keeps cost and abuse low |
 | Download limit | Optional per file, from 1 upward | Allows one-shot handoffs |
 | Deletion | The owner and anyone on the share list can delete | Makes hosting unwanted content harder |
-| Source code | Private for now | Can be opened later |
+| Source code | Public | Free GitHub security tooling (CodeQL, secret scanning, dependency review), and the operator rules below can be checked |
 
 ## Architecture
 
@@ -399,7 +399,7 @@ Rules that keep this true:
 
 - The Worker never logs request headers or bodies.
 - The key is accepted only in a header or a form body.
-- The Worker's source stays private for now, so these rules rest on trust in the operator.
+- The Worker's source is public, so anyone can check these rules in the code. That the deployed Worker matches the source still rests on trust in the operator.
 - An admin cannot inspect a reported file's content unless the reporter supplies the key.
 
 ## Cost
@@ -479,7 +479,7 @@ All five were answered in review comments on 22 November 2026. The answers are f
 
 - [x] Confirm the proposed limits: 60-minute maximum lifetime, 10 GB per account, 30 GB service-wide, 50 uploads a day.
 - [x] Confirm chat retention of 7 days and the 8 KB message size.
-- [x] Decide whether the Worker's source is public.
+- [x] Decide whether the Worker's source is public. (Later changed to public on 22 November 2026.)
 - [x] Pick the domain and the service's name.
 - [x] Decide whether files can be limited to a set number of downloads.
 
