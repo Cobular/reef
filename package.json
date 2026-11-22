@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --infer-origin-from-routes=false --upstream-protocol http",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",

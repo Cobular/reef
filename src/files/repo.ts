@@ -182,22 +182,118 @@ export async function setShares(db: D1Database, fileId: string, add: number[], r
   if (statements.length > 0) await db.batch(statements);
 }
 
-/** Files the user owns or is shared on: live ones, plus those gone in the last `sinceMs`. */
+/** Files the user owns or is shared on: live ones, plus those gone since `goneSince`. */
+const VISIBLE_FILES = `(f.owner_id = ?1 OR f.id IN (SELECT file_id FROM file_shares WHERE user_id = ?1))
+  AND (f.state != 'deleted' OR COALESCE(f.expires_at, f.created_at) > ?2)`;
+
+export interface ShareRow {
+  file_id: string;
+  user_id: number;
+  login: string;
+}
+
+/**
+ * The files a user can see (live ones, plus those gone since `goneSince`) and their share
+ * lists, in one round trip.
+ */
 export async function listFilesFor(
   db: D1Database,
   userId: number,
   goneSince: number,
-): Promise<ListedFile[]> {
+): Promise<{ files: ListedFile[]; shares: ShareRow[] }> {
+  const [files, shares] = await db.batch<ListedFile | ShareRow>([
+    db
+      .prepare(
+        `SELECT f.*, u.login AS owner_login FROM files f JOIN users u ON u.id = f.owner_id
+         WHERE ${VISIBLE_FILES}
+         ORDER BY f.created_at DESC LIMIT 200`,
+      )
+      .bind(userId, goneSince),
+    db
+      .prepare(
+        `SELECT s.file_id, s.user_id, u.login FROM file_shares s JOIN users u ON u.id = s.user_id
+         WHERE s.file_id IN (SELECT f.id FROM files f WHERE ${VISIBLE_FILES})
+         ORDER BY u.login COLLATE NOCASE`,
+      )
+      .bind(userId, goneSince),
+  ]);
+  return {
+    files: (files?.results ?? []) as ListedFile[],
+    shares: (shares?.results ?? []) as ShareRow[],
+  };
+}
+
+/** One file with its owner's login and its share list, in one round trip. */
+export async function fileWithShares(
+  db: D1Database,
+  fileId: string,
+): Promise<{ file: ListedFile | null; shares: ShareRow[] }> {
+  const [file, shares] = await db.batch<ListedFile | ShareRow>([
+    db
+      .prepare(
+        `SELECT f.*, u.login AS owner_login FROM files f JOIN users u ON u.id = f.owner_id
+         WHERE f.id = ?`,
+      )
+      .bind(fileId),
+    db
+      .prepare(
+        `SELECT s.file_id, s.user_id, u.login FROM file_shares s JOIN users u ON u.id = s.user_id
+         WHERE s.file_id = ? ORDER BY u.login COLLATE NOCASE`,
+      )
+      .bind(fileId),
+  ]);
+  return {
+    file: (file?.results[0] as ListedFile | undefined) ?? null,
+    shares: (shares?.results ?? []) as ShareRow[],
+  };
+}
+
+// ---- admin ---------------------------------------------------------------------------------
+
+export interface InviteRow {
+  login: string;
+  created_at: number;
+}
+
+export async function listInvites(db: D1Database): Promise<InviteRow[]> {
   const result = await db
-    .prepare(
-      `SELECT f.*, u.login AS owner_login FROM files f JOIN users u ON u.id = f.owner_id
-       WHERE (f.owner_id = ?1 OR f.id IN (SELECT file_id FROM file_shares WHERE user_id = ?1))
-         AND (f.state != 'deleted' OR COALESCE(f.expires_at, f.created_at) > ?2)
-       ORDER BY f.created_at DESC LIMIT 200`,
-    )
-    .bind(userId, goneSince)
-    .all<ListedFile>();
+    .prepare("SELECT login, created_at FROM invites ORDER BY login COLLATE NOCASE LIMIT 1000")
+    .all<InviteRow>();
   return result.results;
+}
+
+/** Adds an invite; returns false if the login was already invited. */
+export async function addInvite(db: D1Database, login: string, now: number): Promise<boolean> {
+  const result = await db
+    .prepare("INSERT OR IGNORE INTO invites (login, created_at) VALUES (?, ?)")
+    .bind(login, now)
+    .run();
+  return result.meta.changes > 0;
+}
+
+/** Removes an invite (case-insensitive); returns false if there was none. */
+export async function removeInvite(db: D1Database, login: string): Promise<boolean> {
+  const result = await db.prepare("DELETE FROM invites WHERE login = ?").bind(login).run();
+  return result.meta.changes > 0;
+}
+
+export async function listUsers(db: D1Database): Promise<UserRow[]> {
+  const result = await db
+    .prepare("SELECT * FROM users ORDER BY login COLLATE NOCASE LIMIT 1000")
+    .all<UserRow>();
+  return result.results;
+}
+
+/** Sets or clears the banned flag; returns the user, or null if there is no such account. */
+export async function setBanned(
+  db: D1Database,
+  userId: number,
+  banned: boolean,
+): Promise<UserRow | null> {
+  return db
+    .prepare("UPDATE users SET banned = ? WHERE id = ? RETURNING *")
+    .bind(banned ? 1 : 0, userId)
+    .first<UserRow>();
 }
 
 // ---- quotas --------------------------------------------------------------------------------

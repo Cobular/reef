@@ -230,9 +230,24 @@ async function download(request: Request, ctx: FilesContext, token: string, form
   if (!file) throw new ReefError(410, "The file has expired or been deleted.");
   if (!(await canAccess(ctx.env.DB, file, claims.userId)))
     throw new ReefError(401, "This file is no longer shared with you.");
+  return streamDownload(ctx, file, claims.userId, key, form ? null : request.headers.get("Range"));
+}
+
+/**
+ * Streams a file the caller may access (checked by the caller of this function) with its key.
+ * Used by `GET`/`POST /dl/<token>` and by the portal's download form. Throws ReefError for
+ * expired, unfinished or used-up files and WrongKeyError for the wrong key.
+ */
+export async function streamDownload(
+  ctx: FilesContext,
+  file: FileRow,
+  userId: number,
+  key: ArrayBuffer,
+  rangeHeader: string | null,
+): Promise<Response> {
   await assertDownloadable(ctx, file, false);
 
-  const range = form ? null : parseRange(request.headers.get("Range"), file.size);
+  const range = parseRange(rangeHeader, file.size);
   if (range === "unsatisfiable")
     return text(416, "Range not satisfiable.", { "Content-Range": `bytes */${file.size}` });
   // Only a request that includes the first byte counts as a download, so resumes are free and
@@ -249,7 +264,7 @@ async function download(request: Request, ctx: FilesContext, token: string, form
   }
   logEvent("file.download", {
     file: file.id,
-    user: claims.userId,
+    user: userId,
     counted: counts,
     ranged: !!range,
   });

@@ -30,3 +30,17 @@ export function setCookie(name: string, value: string, maxAgeSeconds: number, pa
 export function clearCookie(name: string, path = "/"): string {
   return `${name}=; Path=${path}; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 }
+
+/**
+ * A redirect target that stays on this origin: "/x", never "//x", "/\x" or anything with
+ * whitespace or control characters, which browsers may turn into another host.
+ */
+export function safeNext(value: string | null | undefined): string | null {
+  if (!value || value.length > 512) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f || value[i] === "\\") return null;
+  }
+  return value;
+}

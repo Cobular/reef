@@ -256,7 +256,7 @@ export interface SchoolListing {
   accepted: boolean;
   /** The actor's own session types taking part. */
   sessionTypes: SessionType[];
-  members: { login: string; accepted: boolean }[];
+  members: { id: number; login: string; accepted: boolean }[];
   lastMessageAt: number | null;
   /** Messages after the furthest point any of the actor's sessions has read to. */
   unread: number;
@@ -265,14 +265,14 @@ export interface SchoolListing {
 /** The actor's schools and pending invites (invites first), with members and unread counts. */
 export async function listSchoolsFor(ctx: SchoolsContext, actor: number): Promise<SchoolListing[]> {
   const { schools, members } = await repo.listMemberships(ctx.db, actor);
-  const bySchool = new Map<string, { login: string; accepted: boolean }[]>();
+  const bySchool = new Map<string, SchoolListing["members"]>();
   for (const m of members) {
     let list = bySchool.get(m.school_id);
     if (!list) {
       list = [];
       bySchool.set(m.school_id, list);
     }
-    list.push({ login: m.login, accepted: m.accepted === 1 });
+    list.push({ id: m.user_id, login: m.login, accepted: m.accepted === 1 });
   }
   return schools.map((s) => ({
     id: s.id,

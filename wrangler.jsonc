@@ -18,7 +18,9 @@
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "SIGNUP_MODE": "invite",
-    "PUBLIC_ORIGIN": "https://reef.cobular.com"
+    "PUBLIC_ORIGIN": "https://reef.cobular.com",
+    // GitHub logins (comma-separated, case-insensitive) that can open /admin.
+    "ADMINS": "Cobular"
     // MAINTENANCE is not set here: the security-gate workflow deploys with --var MAINTENANCE:1,
     // and any normal deploy removes it again.
   },

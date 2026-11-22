@@ -5,13 +5,13 @@ import {
 } from "@cloudflare/workers-oauth-provider";
 import type { GitHubApi } from "./auth/github";
 import { finishMcpLogin, MCP_CALLBACK_PATH, showConsent, submitConsent } from "./auth/mcp";
-import { finishLogin, logout, PORTAL_CALLBACK_PATH, portalPage, startLogin } from "./auth/portal";
+import { finishLogin, PORTAL_CALLBACK_PATH } from "./auth/portal";
 import { PART_SIZE, publicOrigin } from "./config";
 import { cleanup } from "./files/cleanup";
 import { handleData } from "./files/http";
-import { errorPage, html, page } from "./lib/html";
 import { logError } from "./lib/log";
 import { mcpApiHandler } from "./mcp/server";
+import { handlePortal } from "./portal/router";
 import { cleanupSchools } from "./schools/cleanup";
 
 export interface WorkerDeps {
@@ -39,24 +39,16 @@ export function createWorker(deps: WorkerDeps) {
       const oauth = getOAuthApi(oauthFor(env).options, env);
       const route = `${request.method} ${url.pathname}`;
       switch (route) {
-        case "GET /":
-          return landing(env);
         case "GET /authorize":
           return showConsent(request, env, oauth, deps.github);
         case "POST /authorize":
           return submitConsent(request, env, oauth, deps.github);
         case `GET ${MCP_CALLBACK_PATH}`:
           return finishMcpLogin(request, env, oauth, deps.github);
-        case "GET /login":
-          return startLogin(env, deps.github);
         case `GET ${PORTAL_CALLBACK_PATH}`:
           return finishLogin(request, env, deps.github);
-        case "GET /portal":
-          return portalPage(request, env);
-        case "POST /logout":
-          return logout();
         default:
-          return errorPage(404, "Not found", "There is nothing here.");
+          return handlePortal(request, env, deps.github, partSize);
       }
     },
   };
@@ -109,16 +101,6 @@ export function createWorker(deps: WorkerDeps) {
       }
     },
   } satisfies ExportedHandler<Env>;
-}
-
-function landing(env: Env): Response {
-  return page(
-    "Reef",
-    html`<p>Reef hands files between AI agent sessions and people. Files live for minutes,
-        are encrypted with a key Reef does not keep, and reach only accounts on their share list.</p>
-      <p>Connect an agent to <code>${publicOrigin(env)}/mcp</code>, or
-        <a href="/login">sign in with GitHub</a>.</p>`,
-  );
 }
 
 function maintenance(): Response {

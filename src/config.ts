@@ -50,6 +50,18 @@ export const SESSION_COOKIE = "__Host-reef-session";
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const PORTAL_STATE_COOKIE = "__Host-reef-login";
 export const STATE_TTL_SECONDS = 10 * 60;
+/** One-time portal messages after a form post ("Invited unrealJune."). */
+export const FLASH_COOKIE = "__Host-reef-flash";
+export const FLASH_TTL_SECONDS = 60;
+
+/** True if the GitHub login is listed in the ADMINS var (comma-separated, case-insensitive). */
+export function isAdmin(env: Env, login: string): boolean {
+  const admins = String(env.ADMINS ?? "")
+    .split(",")
+    .map((l) => l.trim().toLowerCase())
+    .filter(Boolean);
+  return admins.includes(login.toLowerCase());
+}
 
 export function publicOrigin(env: Env): string {
   let origin = env.PUBLIC_ORIGIN as string;
