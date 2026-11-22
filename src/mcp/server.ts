@@ -10,10 +10,8 @@ import {
   filesContext,
   getDownload,
   listFiles,
-  ReefError,
   shareFile,
 } from "../files/service";
-import { logError } from "../lib/log";
 import {
   bullets,
   CREATE_UPLOAD_DESCRIPTION,
@@ -25,36 +23,13 @@ import {
   SERVER_INSTRUCTIONS,
   SHARE_FILE_DESCRIPTION,
 } from "./guidance";
+import { run } from "./result";
+import { registerSchoolTools } from "./schools";
 
 /** Props stored in the OAuth grant by completeAuthorization (see auth-mcp.ts). */
 export interface McpProps {
   userId: number;
   login: string;
-}
-
-interface ToolResult {
-  [key: string]: unknown;
-  content: { type: "text"; text: string }[];
-  isError?: boolean;
-}
-
-function ok(text: string): ToolResult {
-  return { content: [{ type: "text", text }] };
-}
-
-/** Runs a tool body, turning refusals into tool errors the session can read and act on. */
-async function run(tool: string, body: () => Promise<string>): Promise<ToolResult> {
-  try {
-    return ok(await body());
-  } catch (error) {
-    if (error instanceof ReefError)
-      return { content: [{ type: "text", text: error.message }], isError: true };
-    logError("mcp.tool_error", error, { tool });
-    return {
-      content: [{ type: "text", text: "Reef hit an internal error. Try again." }],
-      isError: true,
-    };
-  }
 }
 
 function sizeText(bytes: number): string {
@@ -244,6 +219,8 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
         return `Deleted ${file.name} (${file.id}). Nobody can download it now.`;
       }),
   );
+
+  registerSchoolTools(server, env, caller);
 
   return server;
 }
