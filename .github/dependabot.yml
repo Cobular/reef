@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      cloudflare:
+        patterns: ["wrangler", "@cloudflare/*", "agents"]
+      dev-tooling:
+        dependency-type: development
+        exclude-patterns: ["wrangler", "@cloudflare/*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
