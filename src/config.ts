@@ -31,7 +31,9 @@ export const PORTAL_STATE_COOKIE = "__Host-reef-login";
 export const STATE_TTL_SECONDS = 10 * 60;
 
 export function publicOrigin(env: Env): string {
-  return (env.PUBLIC_ORIGIN as string).replace(/\/+$/, "");
+  let origin = env.PUBLIC_ORIGIN as string;
+  while (origin.endsWith("/")) origin = origin.slice(0, -1);
+  return origin;
 }
 
 export function signupMode(env: Env): "invite" | "open" {
