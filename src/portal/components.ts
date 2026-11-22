@@ -79,6 +79,7 @@ export const icons = {
     '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
     14,
   ),
+  chat: icon('<path d="M4 5h11v8H8l-4 3z"/><path d="M15 9h5v8l-3-2.5h-6.5V13"/>'),
   waves: icon(
     '<path d="M2 9c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2M2 16c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/>',
     32,
@@ -132,6 +133,29 @@ export function faces(accounts: { id: number; login: string }[], label: string):
   )}</ul>`;
 }
 
+/** Avatars with their logins beside them; past `limit`, a "+N more" naming the rest. */
+/** Share-list avatars with logins; the viewer is listed first, as "you". */
+export function sharedWith(
+  accounts: { id: number; login: string }[],
+  viewerId: number,
+  limit = Infinity,
+): Raw {
+  const ordered = [...accounts].sort(
+    (a, b) => Number(b.id === viewerId) - Number(a.id === viewerId),
+  );
+  const shown = ordered.slice(0, limit);
+  const rest = ordered.slice(limit).map((a) => a.login);
+  return html`<ul class="who">${shown.map((a) =>
+    a.id === viewerId
+      ? html`<li>${avatar(a, true)}<span>you</span></li>`
+      : html`<li>${avatar(a, true)}<span class="mono">${a.login}</span></li>`,
+  )}${
+    rest.length > 0
+      ? html`<li class="more" title="${rest.join(", ")}">+${String(rest.length)} more<span class="sr-only">: ${rest.join(", ")}</span></li>`
+      : ""
+  }</ul>`;
+}
+
 export type PillKind = "ready" | "uploading" | "expired" | "paused" | "pending";
 
 const PILL_TEXT: Record<PillKind, string> = {
@@ -148,8 +172,16 @@ export function pill(kind: PillKind, text = PILL_TEXT[kind]): Raw {
 
 /** Relative time, with the exact UTC time on hover; the script keeps it fresh. */
 export function timeEl(ms: number, now: number): Raw {
-  const iso = new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
-  return html`<time datetime="${iso}" title="${utcText(ms)}" data-rel>${relativeText(ms, now)}</time>`;
+  return html`<time datetime="${isoText(ms)}" title="${utcText(ms)}" data-rel>${relativeText(ms, now)}</time>`;
+}
+
+/** "22:46 UTC" from the server; the script shows the viewer's local clock time, UTC on hover. */
+export function clockEl(ms: number): Raw {
+  return html`<time datetime="${isoText(ms)}" title="${utcText(ms)}" data-clock>${utcText(ms).slice(11, 16)} UTC</time>`;
+}
+
+function isoText(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** The tide bar: drains as a file's time runs out, and turns amber under two minutes. */

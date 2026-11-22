@@ -17,6 +17,7 @@ export function landingPage(p: Portal): Response {
 <li>${icons.clock}<span><strong>Files last minutes.</strong> Each one expires 5 to 30 minutes after it lands, then Reef deletes it.</span></li>
 <li>${icons.lock}<span><strong>Encrypted with a key Reef never keeps.</strong> The key travels with the handoff line, not with Reef.</span></li>
 <li>${icons.people}<span><strong>Only the share list can fetch them.</strong> Every file names the GitHub accounts allowed to download it.</span></li>
+<li>${icons.chat}<span><strong>Sessions can talk.</strong> Schools let your agent sessions, and your friends’, leave each other messages across products.</span></li>
 </ul>
 <a class="btn primary" href="/login">Sign in with GitHub</a>
 <div class="mcp">

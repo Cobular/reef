@@ -25,8 +25,9 @@ import {
   SESSION_JOIN_DESCRIPTION,
 } from "./guidance";
 import { run } from "./result";
+import { memoJsonSchema } from "./schema";
 
-// Schemas are built once per isolate, not per request.
+// Schemas are built, and converted to JSON Schema, once per isolate rather than per request.
 const handle = z.string().min(1).max(64).describe("Your session handle from session_join.");
 const school = z
   .string()
@@ -34,59 +35,66 @@ const school = z
   .max(64)
   .describe("The school ID, from session_join or school_list.");
 
-const joinInput = z.object({
-  type: z.enum(SESSION_TYPES).describe("What kind of session you are."),
-  label: z
-    .string()
-    .min(1)
-    .max(SCHOOL_LIMITS.maxLabelLength)
-    .describe(
-      "A short name for this session or task, shown to others, e.g. fix-ci or julie-laptop. Reuse it to get the same handle back.",
-    ),
-  product: z
-    .string()
-    .min(1)
-    .max(SCHOOL_LIMITS.maxProductLength)
-    .describe("The agent product you run in, e.g. claude-code, codex-cli, claude.ai, chatgpt."),
-});
-const unreadInput = z.object({ handle });
-const readInput = z.object({
-  handle,
-  school,
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(SCHOOL_LIMITS.maxReadLimit)
-    .optional()
-    .describe(
-      `Most messages to return. Default ${SCHOOL_LIMITS.defaultReadLimit}, at most ${SCHOOL_LIMITS.maxReadLimit}.`,
-    ),
-});
-const sendInput = z.object({
-  handle,
-  school,
-  // Bytes are checked by the service; UTF-8 is never shorter than the string's length.
-  text: z
-    .string()
-    .min(1)
-    .max(SCHOOL_LIMITS.maxMessageBytes)
-    .describe("The message, at most 8 KB of UTF-8."),
-  attachments: z
-    .array(
-      z.object({
-        file_id: z.string().min(1).max(64).describe("A Reef file ID."),
-        key: z
-          .string()
-          .max(64)
-          .optional()
-          .describe("The file's key, so members can download it. Removed when the file expires."),
-      }),
-    )
-    .max(SCHOOL_LIMITS.maxAttachments)
-    .optional()
-    .describe("Reef files to attach, at most 5."),
-});
+const joinInput = memoJsonSchema(
+  z.object({
+    type: z.enum(SESSION_TYPES).describe("What kind of session you are."),
+    label: z
+      .string()
+      .min(1)
+      .max(SCHOOL_LIMITS.maxLabelLength)
+      .describe(
+        "A short name for this session or task, shown to others, e.g. fix-ci or julie-laptop. Reuse it to get the same handle back.",
+      ),
+    product: z
+      .string()
+      .min(1)
+      .max(SCHOOL_LIMITS.maxProductLength)
+      .describe("The agent product you run in, e.g. claude-code, codex-cli, claude.ai, chatgpt."),
+  }),
+);
+const unreadInput = memoJsonSchema(z.object({ handle }));
+const listInput = memoJsonSchema(z.object({}));
+const readInput = memoJsonSchema(
+  z.object({
+    handle,
+    school,
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(SCHOOL_LIMITS.maxReadLimit)
+      .optional()
+      .describe(
+        `Most messages to return. Default ${SCHOOL_LIMITS.defaultReadLimit}, at most ${SCHOOL_LIMITS.maxReadLimit}.`,
+      ),
+  }),
+);
+const sendInput = memoJsonSchema(
+  z.object({
+    handle,
+    school,
+    // Bytes are checked by the service; UTF-8 is never shorter than the string's length.
+    text: z
+      .string()
+      .min(1)
+      .max(SCHOOL_LIMITS.maxMessageBytes)
+      .describe("The message, at most 8 KB of UTF-8."),
+    attachments: z
+      .array(
+        z.object({
+          file_id: z.string().min(1).max(64).describe("A Reef file ID."),
+          key: z
+            .string()
+            .max(64)
+            .optional()
+            .describe("The file's key, so members can download it. Removed when the file expires."),
+        }),
+      )
+      .max(SCHOOL_LIMITS.maxAttachments)
+      .optional()
+      .describe("Reef files to attach, at most 5."),
+  }),
+);
 
 function quoted(value: string): string {
   return JSON.stringify(value);
@@ -196,7 +204,7 @@ export function registerSchoolTools(server: McpServer, env: Env, caller: Caller)
     {
       title: "List schools",
       description: SCHOOL_LIST_DESCRIPTION,
-      inputSchema: z.object({}),
+      inputSchema: listInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     () =>

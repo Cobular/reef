@@ -178,6 +178,8 @@ export async function updatePaused(db: D1Database, schoolId: string, paused: boo
 export interface ListedMembershipRow extends MembershipRow {
   created_by_login: string | null;
   last_message_at: number | null;
+  /** The furthest seq any of the account's sessions has read to (0 for none, or an invite). */
+  read_seq: number;
   unread: number;
 }
 
@@ -189,8 +191,9 @@ export interface MemberRow {
 }
 
 /**
- * The account's schools and invites, and every member of them, in one round trip. `unread`
- * counts messages after the furthest position any of the account's sessions has read to.
+ * The account's schools and invites, and every member of them, in one round trip. `read_seq` is
+ * the furthest position any of the account's sessions has read to; `unread` counts messages
+ * after it.
  */
 export async function listMemberships(
   db: D1Database,
@@ -199,20 +202,25 @@ export async function listMemberships(
   const [schools, members] = await db.batch<ListedMembershipRow | MemberRow>([
     db
       .prepare(
-        `SELECT sc.*, sm.accepted, sm.session_types, cu.login AS created_by_login,
-           (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
-             AS last_message_at,
-           CASE WHEN sm.accepted = 1 THEN
-             (SELECT COUNT(*) FROM messages m WHERE m.school_id = sc.id AND m.seq > COALESCE(
+        `SELECT l.*,
+           CASE WHEN l.accepted = 1 THEN
+             (SELECT COUNT(*) FROM messages m WHERE m.school_id = l.id AND m.seq > l.read_seq)
+           ELSE 0 END AS unread
+         FROM (
+           SELECT sc.*, sm.accepted, sm.session_types, cu.login AS created_by_login,
+             (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
+               AS last_message_at,
+             CASE WHEN sm.accepted = 1 THEN COALESCE(
                (SELECT MAX(rp.last_seq) FROM read_positions rp
                 JOIN sessions s ON s.handle = rp.session_handle
-                WHERE rp.school_id = sc.id AND s.user_id = ?1), 0))
-           ELSE 0 END AS unread
-         FROM school_members sm
-         JOIN schools sc ON sc.id = sm.school_id
-         LEFT JOIN users cu ON cu.id = sc.created_by
-         WHERE sm.user_id = ?1
-         ORDER BY sm.accepted, sc.name COLLATE NOCASE`,
+                WHERE rp.school_id = sc.id AND s.user_id = ?1), 0)
+             ELSE 0 END AS read_seq
+           FROM school_members sm
+           JOIN schools sc ON sc.id = sm.school_id
+           LEFT JOIN users cu ON cu.id = sc.created_by
+           WHERE sm.user_id = ?1
+         ) l
+         ORDER BY l.accepted, l.name COLLATE NOCASE`,
       )
       .bind(userId),
     db
@@ -547,14 +555,23 @@ export interface AttachmentFileRow {
   shares: string;
 }
 
-/** The files to attach, with share lists, and the school's accepted members, in one round trip. */
+export interface AttachmentMemberRow {
+  user_id: number;
+  login: string;
+  accepted: number;
+}
+
+/**
+ * The files to attach, with share lists, and every member of the school, pending invitees
+ * included, in one round trip.
+ */
 export async function attachmentContext(
   db: D1Database,
   schoolId: string,
   fileIds: string[],
-): Promise<{ files: AttachmentFileRow[]; members: { user_id: number; login: string }[] }> {
+): Promise<{ files: AttachmentFileRow[]; members: AttachmentMemberRow[] }> {
   const marks = fileIds.map(() => "?").join(",");
-  const [files, members] = await db.batch<AttachmentFileRow | { user_id: number; login: string }>([
+  const [files, members] = await db.batch<AttachmentFileRow | AttachmentMemberRow>([
     db
       .prepare(
         `SELECT f.id, f.name, f.owner_id, f.state, f.expires_at,
@@ -564,13 +581,15 @@ export async function attachmentContext(
       .bind(...fileIds),
     db
       .prepare(
-        `SELECT sm.user_id, u.login FROM school_members sm JOIN users u ON u.id = sm.user_id
-           WHERE sm.school_id = ? AND sm.accepted = 1`,
+        `SELECT sm.user_id, u.login, sm.accepted FROM school_members sm
+           JOIN users u ON u.id = sm.user_id
+           WHERE sm.school_id = ?
+           ORDER BY u.login COLLATE NOCASE`,
       )
       .bind(schoolId),
   ]);
   return {
     files: (files?.results ?? []) as AttachmentFileRow[],
-    members: (members?.results ?? []) as { user_id: number; login: string }[],
+    members: (members?.results ?? []) as AttachmentMemberRow[],
   };
 }

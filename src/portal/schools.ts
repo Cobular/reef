@@ -11,8 +11,11 @@ import { csrfField, emptyState, faces, fieldError, pill, postButton, timeEl } fr
 import { formCsrfOk, loginList, readForm, type SignedIn, seeOther } from "./context";
 import { forbidden, render } from "./layout";
 
-export function kindText(school: SchoolListing): string {
-  if (school.kind === "pair") return "Pair";
+export function kindText(school: SchoolListing, viewerId: number): string {
+  if (school.kind === "pair") {
+    const other = school.members.find((m) => m.id !== viewerId);
+    return other ? `With ${other.login}` : "Pair";
+  }
   const n = school.members.length;
   if (n <= 1) return "Just your sessions";
   return `Group · ${n} members`;
@@ -30,7 +33,7 @@ function inviteRow(p: SignedIn, school: SchoolListing): Raw {
   return html`<li class="row">
 <div>
 <div class="row-title"><a href="${base}">${school.name}</a>${pill("pending")}</div>
-<div class="meta"><span>${school.createdBy ? html`From <span class="mono">${school.createdBy}</span>` : "Invitation"}</span><span>${kindText(school)}</span>${memberFaces(school)}</div>
+<div class="meta"><span>${school.createdBy ? html`From <span class="mono">${school.createdBy}</span>` : "Invitation"}</span><span>${kindText(school, p.user.userId)}</span>${memberFaces(school)}</div>
 </div>
 <div></div>
 <div class="row-actions">${postButton(`${base}/accept`, p.csrf, "Accept", "btn small primary")}${postButton(
@@ -42,24 +45,24 @@ function inviteRow(p: SignedIn, school: SchoolListing): Raw {
 </li>`;
 }
 
+/** The whole row is the school's link (a stretched link), so there is one tab stop per row. */
 function schoolRow(p: SignedIn, school: SchoolListing): Raw {
   const unread =
     school.unread > 0
       ? html`<span class="badge" title="${String(school.unread)} unread">${String(school.unread)}<span class="sr-only"> unread</span></span>`
       : "";
-  return html`<li class="row">
+  return html`<li class="row link">
 <div>
-<div class="row-title"><a href="/schools/${school.id}">${school.name}</a>${unread}${
+<div class="row-title"><a href="/schools/${school.id}${school.unread > 0 ? "#new" : ""}">${school.name}</a>${unread}${
     school.paused ? pill("paused") : ""
   }</div>
-<div class="meta"><span>${kindText(school)}</span>${memberFaces(school)}</div>
+<div class="meta"><span>${kindText(school, p.user.userId)}</span>${memberFaces(school)}</div>
 </div>
 <div class="small muted">${
     school.lastMessageAt !== null
       ? html`Last message ${timeEl(school.lastMessageAt, p.now)}`
       : "No messages yet"
   }</div>
-<div class="row-actions"><a class="btn small" href="/schools/${school.id}" aria-label="Open ${school.name}">Open</a></div>
 </li>`;
 }
 

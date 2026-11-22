@@ -253,11 +253,17 @@ export async function fileWithShares(
 export interface InviteRow {
   login: string;
   created_at: number;
+  /** 1 once an account with this login exists. */
+  joined: number;
 }
 
 export async function listInvites(db: D1Database): Promise<InviteRow[]> {
   const result = await db
-    .prepare("SELECT login, created_at FROM invites ORDER BY login COLLATE NOCASE LIMIT 1000")
+    .prepare(
+      `SELECT i.login, i.created_at,
+         EXISTS (SELECT 1 FROM users u WHERE u.login = i.login COLLATE NOCASE) AS joined
+       FROM invites i ORDER BY i.login COLLATE NOCASE LIMIT 1000`,
+    )
     .all<InviteRow>();
   return result.results;
 }

@@ -24,6 +24,7 @@ import {
   SHARE_FILE_DESCRIPTION,
 } from "./guidance";
 import { run } from "./result";
+import { memoJsonSchema } from "./schema";
 import { registerSchoolTools } from "./schools";
 
 /** Props stored in the OAuth grant by completeAuthorization (see auth-mcp.ts). */
@@ -47,6 +48,48 @@ function sizeText(bytes: number): string {
 const fileId = z.string().min(1).max(64).describe("The file ID, as in a handoff line's id= field.");
 const logins = z.array(z.string().min(1).max(39)).max(10);
 
+// Schemas are built, and converted to JSON Schema, once per isolate rather than per request.
+const createUploadInput = memoJsonSchema(
+  z.object({
+    name: z.string().min(1).max(255).describe("File name, without a directory, e.g. report.pdf"),
+    size: z.number().int().min(0).describe("Exact file size in bytes, e.g. from `wc -c < file`"),
+    lifetime_minutes: z
+      .number()
+      .int()
+      .min(1)
+      .max(30)
+      .optional()
+      .describe("Minutes the file lives after the upload finishes. Default 10, at most 30."),
+    download_limit: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe("How many downloads may start. Omit for no limit."),
+    share_with: logins
+      .optional()
+      .describe("GitHub logins of Reef accounts that may download it, at most 10."),
+    key: z
+      .string()
+      .optional()
+      .describe("Your own 32-byte base64 key. Omit and Reef generates one (recommended)."),
+  }),
+);
+const fileInput = memoJsonSchema(z.object({ file_id: fileId }));
+const noInput = memoJsonSchema(z.object({}));
+const shareInput = memoJsonSchema(
+  z.object({
+    file_id: fileId,
+    add: logins.optional().describe("GitHub logins to add."),
+    remove: logins.optional().describe("GitHub logins to remove."),
+  }),
+);
+
+/**
+ * One request's MCP server. The SDK needs a new instance per request (it refuses to reuse one
+ * that is serving, and keeps each exchange's negotiated client state on it), and the closures
+ * below capture this request's caller; the schemas and their JSON Schema are shared.
+ */
 export function buildServer(env: Env, caller: Caller, partSize: number): McpServer {
   const server = new McpServer(
     { name: "reef", version: "0.1.0" },
@@ -59,38 +102,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     {
       title: "Create upload",
       description: CREATE_UPLOAD_DESCRIPTION,
-      inputSchema: z.object({
-        name: z
-          .string()
-          .min(1)
-          .max(255)
-          .describe("File name, without a directory, e.g. report.pdf"),
-        size: z
-          .number()
-          .int()
-          .min(0)
-          .describe("Exact file size in bytes, e.g. from `wc -c < file`"),
-        lifetime_minutes: z
-          .number()
-          .int()
-          .min(1)
-          .max(30)
-          .optional()
-          .describe("Minutes the file lives after the upload finishes. Default 10, at most 30."),
-        download_limit: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe("How many downloads may start. Omit for no limit."),
-        share_with: logins
-          .optional()
-          .describe("GitHub logins of Reef accounts that may download it, at most 10."),
-        key: z
-          .string()
-          .optional()
-          .describe("Your own 32-byte base64 key. Omit and Reef generates one (recommended)."),
-      }),
+      inputSchema: createUploadInput,
       annotations: { destructiveHint: false, openWorldHint: false },
     },
     (input) =>
@@ -132,7 +144,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     {
       title: "Get download",
       description: GET_DOWNLOAD_DESCRIPTION,
-      inputSchema: z.object({ file_id: fileId }),
+      inputSchema: fileInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ file_id }) =>
@@ -159,7 +171,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     {
       title: "List files",
       description: LIST_FILES_DESCRIPTION,
-      inputSchema: z.object({}),
+      inputSchema: noInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     () =>
@@ -189,11 +201,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     {
       title: "Share file",
       description: SHARE_FILE_DESCRIPTION,
-      inputSchema: z.object({
-        file_id: fileId,
-        add: logins.optional().describe("GitHub logins to add."),
-        remove: logins.optional().describe("GitHub logins to remove."),
-      }),
+      inputSchema: shareInput,
       annotations: { idempotentHint: true, openWorldHint: false },
     },
     ({ file_id, add, remove }) =>
@@ -210,7 +218,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     {
       title: "Delete file",
       description: DELETE_FILE_DESCRIPTION,
-      inputSchema: z.object({ file_id: fileId }),
+      inputSchema: fileInput,
       annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     ({ file_id }) =>

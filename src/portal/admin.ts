@@ -2,7 +2,7 @@ import { addInvite, getFile, listInvites, listUsers, removeInvite, setBanned } f
 import { destroyFile, filesContext } from "../files/service";
 import { html } from "../lib/html";
 import { logEvent } from "../lib/log";
-import { avatar, confirmForm, csrfField, postButton, timeEl } from "./components";
+import { avatar, confirmForm, csrfField, pill, postButton, timeEl } from "./components";
 import { type FlashKind, formCsrfOk, readForm, type SignedIn, seeOther } from "./context";
 import { forbidden, render } from "./layout";
 
@@ -24,9 +24,11 @@ export async function adminPage(p: SignedIn): Promise<Response> {
 </form>
 ${
   invites.length > 0
-    ? html`<div class="table-wrap section-gap"><table><thead><tr><th scope="col">Login</th><th scope="col">Added</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${invites.map(
+    ? html`<div class="table-wrap section-gap"><table><thead><tr><th scope="col">Login</th><th scope="col">Added</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${invites.map(
         (i) =>
-          html`<tr><td class="mono">${i.login}</td><td>${timeEl(i.created_at, p.now)}</td><td>${postButton(
+          html`<tr><td class="mono">${i.login}</td><td>${timeEl(i.created_at, p.now)}</td><td>${
+            i.joined ? pill("ready", "Joined") : pill("expired", "Not yet")
+          }</td><td>${postButton(
             "/admin/invites/remove",
             p.csrf,
             "Remove",

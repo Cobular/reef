@@ -3,7 +3,7 @@ import { logout, startLogin } from "../auth/portal";
 import { redirect, safeNext, text } from "../lib/http";
 import { logError } from "../lib/log";
 import { ADMIN_ACTIONS, type AdminAction, adminAction, adminPage } from "./admin";
-import { serveAsset } from "./assets";
+import { serveAsset, serveFaviconIco } from "./assets";
 import { formCsrfOk, type Portal, portalContext, readForm, type SignedIn } from "./context";
 import { deleteFromPortal, downloadFromPortal, filePage, shareFromPortal } from "./file";
 import { filesPage } from "./files";
@@ -37,6 +37,24 @@ export async function handlePortal(
   if (url.pathname.startsWith("/static/")) {
     if (request.method !== "GET" && request.method !== "HEAD") return text(405, "Use GET.");
     return serveAsset(url.pathname) ?? text(404, "Not found.");
+  }
+  if (url.pathname === "/favicon.ico") {
+    if (request.method !== "GET" && request.method !== "HEAD") return text(405, "Use GET.");
+    return serveFaviconIco();
+  }
+  // HEAD answers like GET (uptime monitors use it), with the same status and headers, no body.
+  if (request.method === "HEAD") {
+    const response = await handlePortal(
+      new Request(request, { method: "GET" }),
+      env,
+      github,
+      partSize,
+    );
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   }
   const p = await portalContext(request, env, partSize);
   try {

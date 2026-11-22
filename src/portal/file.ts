@@ -14,12 +14,14 @@ import { html, type Raw } from "../lib/html";
 import { safeNext } from "../lib/http";
 import {
   avatar,
+  clockEl,
   confirmForm,
   csrfField,
   fieldError,
   formatSize,
   icons,
   pill,
+  sharedWith,
   tide,
   timeEl,
   utcText,
@@ -110,10 +112,10 @@ ${fieldError("key-error", errors.key ?? null)}
 <dl class="kv">
 <dt>Size</dt><dd>${formatSize(file.size)}</dd>
 <dt>From</dt><dd>${ownerText(view, p.user.userId)}</dd>
-<dt>Shared with</dt><dd>${view.shares.length > 0 ? html`<span class="mono">${view.shares.join(", ")}</span>` : "Nobody else"}</dd>
+<dt>Shared with</dt><dd>${view.shareAccounts.length > 0 ? sharedWith(view.shareAccounts, p.user.userId) : "Nobody else"}</dd>
 <dt>Expires</dt><dd>${
     file.expires_at !== null
-      ? html`${timeEl(file.expires_at, p.now)}${tide(file.expires_at, file.lifetime_minutes, p.now)}`
+      ? html`${clockEl(file.expires_at)}${tide(file.expires_at, file.lifetime_minutes, p.now)}`
       : html`${String(file.lifetime_minutes)} min after the upload finishes`
   }</dd>
 <dt>Downloads</dt><dd>${downloadsText(view)}</dd>

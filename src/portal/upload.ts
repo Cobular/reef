@@ -67,7 +67,7 @@ ${copyBlock("key", "", "Copy the key", { guard: true })}
 <p class="note">This is the only time Reef shows the key. Anyone on the share list who has this line can download the file until it expires.</p>
 <dl class="kv">
 <dt>Expires</dt>
-<dd><time datetime="" title="" data-rel></time>
+<dd><time datetime="" title="" data-clock></time>
 <div class="timer" data-end="0" data-total="1"><div class="tide" role="presentation"><span class="w100"></span></div><span class="left"></span></div></dd>
 </dl>
 <p class="section-gap"><a class="btn" data-slot="link" href="/files">View the file</a> <a class="btn quiet" href="/files/new">Upload another</a></p>

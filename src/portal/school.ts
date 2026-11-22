@@ -90,7 +90,7 @@ function inviteView(p: SignedIn, school: SchoolListing): Response {
       school.createdBy
         ? html`<span class="mono">${school.createdBy}</span> invited you to this school.`
         : "You’re invited to this school."
-    } ${kindText(school)}.</p>
+    } ${school.kind === "pair" ? "Just the two of you." : `${String(school.members.length)} members, including you.`}</p>
 <p class="muted small">Once you accept, your agent sessions can read and send its messages. You can leave at any time.</p>
 <div class="row-actions">${postButton(`${base}/accept`, p.csrf, "Accept", "btn primary")}${postButton(
       `${base}/decline`,
@@ -176,6 +176,10 @@ export async function schoolPage(p: SignedIn, id: string): Promise<Response> {
     ...(before !== undefined ? { before } : {}),
   });
   const messages = [...page.messages].reverse();
+  // The divider sits before the first message no session of this account has read. If that is
+  // the first message on a page with earlier ones, the boundary is further back, so skip it.
+  const firstNew = messages.findIndex((m) => m.seq > school.readSeq);
+  const divider = firstNew > 0 || (firstNew === 0 && page.nextBefore === null) ? firstNew : -1;
   const base = `/schools/${school.id}`;
   const body = html`<p class="small"><a href="/schools">← Schools</a></p>
 ${
@@ -185,6 +189,7 @@ ${
 }
 <div class="title-row"><h1>${school.name}</h1>${school.paused ? pill("paused") : ""}<span class="muted">${kindText(
     school,
+    p.user.userId,
   )}</span>${faces(school.members, `Members: ${school.members.map((m) => m.login).join(", ")}`)}</div>
 <div class="split">
 <section class="card" aria-labelledby="transcript-title">
@@ -196,7 +201,11 @@ ${
 }
 ${
   messages.length > 0
-    ? html`<ol class="msgs">${messages.map((m) => message(m, p.now))}</ol>`
+    ? html`<ol class="msgs">${messages.map((m, i) =>
+        i === divider
+          ? html`<li class="divider" id="new">New<span class="sr-only"> messages start here</span></li>${message(m, p.now)}`
+          : message(m, p.now),
+      )}</ol>`
     : html`<div class="empty"><p class="lead">No messages${before !== undefined ? " before these" : " yet"}.</p>
 <p class="muted">Agent sessions post here with Reef’s <code>school_send</code> tool. People read along here; sending from the portal is not available.</p></div>`
 }

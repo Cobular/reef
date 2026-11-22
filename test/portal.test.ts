@@ -13,6 +13,7 @@ import {
   createSchool,
   inviteToSchool,
   joinSession,
+  readMessages,
   schoolsContext,
   sendMessage,
 } from "../src/schools/service";
@@ -186,6 +187,42 @@ describe("pages and headers", () => {
     expect(await (await get("/schools", bob)).text()).toContain("You’re not in any schools yet.");
   });
 
+  it("answers HEAD like GET, with no body", async () => {
+    const head = async (path: string, user?: Who) =>
+      call(
+        worker,
+        new Request(`${ORIGIN}${path}`, {
+          method: "HEAD",
+          headers: user ? { Cookie: await cookieFor(user) } : {},
+          redirect: "manual",
+        }),
+        workerEnv,
+      );
+    for (const [path, user, status] of [
+      ["/", undefined, 200],
+      ["/files", bob, 200],
+      ["/schools", bob, 200],
+      ["/files", undefined, 303],
+      ["/nowhere", undefined, 404],
+    ] as const) {
+      const res = await head(path, user);
+      expect(res.status, path).toBe(status);
+      expect(await res.text(), path).toBe("");
+      if (status === 200) {
+        expect(res.headers.get("Content-Type"), path).toContain("text/html");
+        expect(res.headers.get("Content-Security-Policy"), path).toContain("default-src 'none'");
+      }
+    }
+  });
+
+  it("has a quiet footer with the source, security policy and MCP URL", async () => {
+    const body = await (await get("/files", bob)).text();
+    expect(body).toContain('href="https://github.com/Cobular/reef"');
+    expect(body).toContain('href="https://github.com/Cobular/reef/security/policy"');
+    expect(body).toContain(`<code id="foot-mcp">${ORIGIN}/mcp</code>`);
+    expect(body).not.toContain("Files last minutes.</footer>");
+  });
+
   it("sends signed-out visitors to sign in and back, and 404s unknown pages", async () => {
     const files = await get("/files/abc?x=1");
     expect(files.status).toBe(303);
@@ -338,6 +375,26 @@ describe("file detail and download", () => {
     expect(await late.text()).toContain("This file has swum off.");
   });
 
+  it("names who a file is shared with, and shows expiry as a clock time", async () => {
+    await addUser(4, "dave");
+    const file = await readyFile(bob, ["Cobular", "carol", "dave"]);
+    const list = await (await get("/files", bob)).text();
+    expect(list).toContain("<span>Yours</span>");
+    expect(list).toContain('<span class="mono">Cobular</span>');
+    expect(list).toContain('<span class="mono">carol</span>');
+    expect(list).toMatch(/title="(Cobular|carol|dave)">\+1 more<span class="sr-only">: \1<\/span>/);
+    expect(await (await get("/files", admin)).text()).toContain("From bob");
+
+    const detail = await (await get(`/files/${file.file.id}`, bob)).text();
+    for (const login of ["Cobular", "carol", "dave"])
+      expect(detail).toContain(`<span class="mono">${login}</span>`);
+    expect(detail).not.toContain(" more<");
+    expect(detail).toMatch(
+      /<dt>Expires<\/dt><dd><time datetime="[^"]+Z" title="[^"]+ UTC" data-clock>\d\d:\d\d UTC<\/time>/,
+    );
+    expect(detail).toContain('class="left"');
+  });
+
   it("lets the owner share, and anyone on the list delete", async () => {
     const file = await readyFile(bob);
     const shared = await post(`/files/${file.file.id}/share`, bob, { add: "carol" });
@@ -439,6 +496,37 @@ describe("schools", () => {
     expect(body).toContain(`/files/${file.file.id}`);
     expect(body).toContain("another account");
     expectCleanHtml(body);
+
+    // Nothing read yet: the divider sits before the first message.
+    expect(body.indexOf('class="divider"')).toBeLessThan(body.indexOf("first &lt;script&gt;"));
+    await readMessages(ctx, admin.userId, adminSession, school.school.id);
+    await sendMessage(ctx, bob.userId, bobSession, school.school.id, "third");
+    const after = await (await get(`/schools/${school.school.id}`, admin)).text();
+    const divider = after.indexOf('class="divider"');
+    expect(divider).toBeGreaterThan(after.indexOf("second"));
+    expect(divider).toBeLessThan(after.indexOf("third"));
+    // The portal never moves read positions.
+    const again = await (await get(`/schools/${school.school.id}`, admin)).text();
+    expect(again.indexOf('class="divider"')).toBeLessThan(again.indexOf("third"));
+    await readMessages(ctx, admin.userId, adminSession, school.school.id);
+    expect(await (await get(`/schools/${school.school.id}`, admin)).text()).not.toContain(
+      'class="divider"',
+    );
+  });
+
+  it("lists schools as stretched links that say who is in them", async () => {
+    const ctx = schoolsContext(workerEnv);
+    const pair = await createSchool(ctx, bob.userId, "dm", "pair", ["Cobular"]);
+    await acceptInvite(ctx, admin.userId, pair.school.id);
+    await createSchool(ctx, bob.userId, "crew", "group", ["carol", "Cobular"]);
+    await createSchool(ctx, bob.userId, "mine", "group", []);
+    const body = await (await get("/schools", bob)).text();
+    expect(body).toContain("With Cobular");
+    expect(body).toContain("Group · 3 members");
+    expect(body).toContain("Just your sessions");
+    expect(body).toContain('<li class="row link">');
+    expect(body).not.toContain(">Open</a>");
+    expect(await (await get("/schools", admin)).text()).toContain("With bob");
   });
 
   it("only invites into a group with room, from the page", async () => {
@@ -496,6 +584,21 @@ describe("admin", () => {
     expect(await followFlash(missing, admin)).toContain("No live file has the ID");
   });
 
+  it("shows whether each invited login has signed up", async () => {
+    await addInvite(env.DB, "CAROL", 1);
+    await addInvite(env.DB, "NewPerson", 2);
+    const invites = await listInvites(env.DB);
+    expect(invites.map((i) => [i.login, Boolean(i.joined)])).toEqual([
+      ["CAROL", true],
+      ["NewPerson", false],
+    ]);
+    const body = await (await get("/admin", admin)).text();
+    expect(body).toMatch(/>CAROL<\/td><td>.*?<\/td><td><span class="pill ready">Joined<\/span>/);
+    expect(body).toMatch(
+      />NewPerson<\/td><td>.*?<\/td><td><span class="pill expired">Not yet<\/span>/,
+    );
+  });
+
   it("repo helpers report what changed", async () => {
     expect(await addInvite(env.DB, "Zed", 1)).toBe(true);
     expect(await addInvite(env.DB, "zed", 2)).toBe(false);
@@ -523,6 +626,14 @@ describe("static assets", () => {
       expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     }
     expect((await get("/static/portal.0000000000.css")).status).toBe(404);
+  });
+
+  it("serves /favicon.ico as the SVG favicon", async () => {
+    const res = await get("/favicon.ico");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/svg+xml");
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=86400");
+    expect(await res.text()).toContain("<svg");
   });
 
   it("has ASSET_VERSION matching the content (update it when CSS or JS change)", async () => {

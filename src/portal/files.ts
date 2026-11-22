@@ -4,10 +4,10 @@ import { html, type Raw } from "../lib/html";
 import {
   confirmForm,
   emptyState,
-  faces,
   formatSize,
   looksLikeFileName,
   pill,
+  sharedWith,
   tide,
   timeEl,
 } from "./components";
@@ -33,7 +33,7 @@ const uploadLink = html`<a class="btn primary" href="/files/new">Upload a file</
 function fileRow(p: SignedIn, view: ListedFileView): Raw {
   const { file } = view;
   const href = `/files/${file.id}`;
-  const shared = faces(view.shareAccounts, `Shared with ${view.shares.join(", ")}`);
+  const mine = file.owner_id === p.user.userId;
   let timer: Raw;
   if (view.status === "ready" && file.expires_at !== null)
     timer = tide(file.expires_at, file.lifetime_minutes, p.now);
@@ -45,12 +45,14 @@ function fileRow(p: SignedIn, view: ListedFileView): Raw {
     }</span>`;
   const status =
     view.status === "ready" ? pill("ready") : view.status === "uploading" ? pill("uploading") : "";
-  return html`<li class="row${view.status === "gone" ? " gone" : ""}">
+  return html`<li class="row file${view.status === "gone" ? " gone" : ""}">
 <div>
 <div class="row-title"><a href="${href}">${fileName(file.name)}</a>${status}</div>
-<div class="meta"><span>${formatSize(file.size)}</span><span>From ${ownerText(view, p.user.userId)}</span>${
+<div class="meta"><span>${formatSize(file.size)}</span><span>${
+    mine ? "Yours" : html`From ${file.owner_login}`
+  }</span>${
     view.shareAccounts.length > 0
-      ? html`<span class="meta">Shared with ${shared}</span>`
+      ? html`<span class="shared">Shared with ${sharedWith(view.shareAccounts, p.user.userId, 2)}</span>`
       : html`<span>Not shared</span>`
   }${view.status === "gone" ? "" : html`<span>${downloadsText(view)}</span>`}</div>
 </div>
