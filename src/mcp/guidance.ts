@@ -84,7 +84,7 @@ export const SCHOOL_READ_DESCRIPTION = `Read this session's unread messages in o
 Rules:
 ${bullets(SCHOOL_READ_RULES)}`;
 
-export const SCHOOL_SEND_DESCRIPTION = `Send a message to a school. Returns the message's sequence number. Text is at most 8 KB of UTF-8. Attach up to 5 Reef files as [{file_id, key}]; every other member must already be on each file's share list (use share_file first). Put a file's key in the attachment, not in the text: Reef removes attachment keys when the file expires, but text stays for 30 days. Sending fails while the school is paused.
+export const SCHOOL_SEND_DESCRIPTION = `Send a message to a school. Returns the message's sequence number. Text is at most 8 KB of UTF-8. Attach up to 5 Reef files as [{file_id, key}]; every other member, including invited members who haven't accepted yet, must already be on each file's share list (use share_file first). Put a file's key in the attachment, not in the text: Reef removes attachment keys when the file expires, but text stays for 30 days. Sending fails while the school is paused.
 
 Rules:
 ${bullets(SCHOOL_SAFETY_RULES)}`;

@@ -256,8 +256,10 @@ export interface SchoolListing {
   accepted: boolean;
   /** The actor's own session types taking part. */
   sessionTypes: SessionType[];
-  members: { login: string; accepted: boolean }[];
+  members: { id: number; login: string; accepted: boolean }[];
   lastMessageAt: number | null;
+  /** The furthest seq any of the actor's sessions has read to; 0 if none has read any. */
+  readSeq: number;
   /** Messages after the furthest point any of the actor's sessions has read to. */
   unread: number;
 }
@@ -265,14 +267,14 @@ export interface SchoolListing {
 /** The actor's schools and pending invites (invites first), with members and unread counts. */
 export async function listSchoolsFor(ctx: SchoolsContext, actor: number): Promise<SchoolListing[]> {
   const { schools, members } = await repo.listMemberships(ctx.db, actor);
-  const bySchool = new Map<string, { login: string; accepted: boolean }[]>();
+  const bySchool = new Map<string, SchoolListing["members"]>();
   for (const m of members) {
     let list = bySchool.get(m.school_id);
     if (!list) {
       list = [];
       bySchool.set(m.school_id, list);
     }
-    list.push({ login: m.login, accepted: m.accepted === 1 });
+    list.push({ id: m.user_id, login: m.login, accepted: m.accepted === 1 });
   }
   return schools.map((s) => ({
     id: s.id,
@@ -284,6 +286,7 @@ export async function listSchoolsFor(ctx: SchoolsContext, actor: number): Promis
     sessionTypes: parseSessionTypes(s.session_types),
     members: bySchool.get(s.id) ?? [],
     lastMessageAt: s.last_message_at,
+    readSeq: s.read_seq,
     unread: s.unread,
   }));
 }
@@ -583,7 +586,8 @@ function checkAttachmentShape(attachments: AttachmentInput[]): void {
 
 /**
  * Checks each attached file exists, is live, and is the sender's to pass on, and that every
- * other accepted member is already on its share list. Reef does not share files on its own.
+ * other member, pending invitees included, is already on its share list: an invitee who
+ * accepts later reads the same message. Reef does not share files on its own.
  */
 async function storedAttachments(
   ctx: SchoolsContext,
@@ -603,7 +607,7 @@ async function storedAttachments(
       throw new ReefError(410, `File ${file.id} has expired or been deleted.`);
     const missing = members
       .filter((m) => m.user_id !== file.owner_id && !shares.includes(m.user_id))
-      .map((m) => m.login);
+      .map((m) => (m.accepted === 1 ? m.login : `${m.login} (invited)`));
     if (missing.length > 0)
       throw new ReefError(
         403,

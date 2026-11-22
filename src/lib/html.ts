@@ -29,17 +29,44 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Raw {
   return new Raw(out);
 }
 
+/**
+ * The portal's policy: styles and scripts only from Reef's own static files, so no inline
+ * `<script>` or `style=` attribute can run, and forms may only post back to Reef.
+ */
+export const PORTAL_CSP =
+  "default-src 'none'; style-src 'self'; script-src 'self'; " +
+  "img-src 'self' https://avatars.githubusercontent.com data:; connect-src 'self'; " +
+  "form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
+/**
+ * The OAuth consent and sign-up refusal pages. No form-action: browsers apply it to the redirect
+ * after a form post, and the consent form redirects on to GitHub or the MCP client's own
+ * redirect URI. Their small stylesheet is inline, so they stand alone.
+ */
+export const STANDALONE_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
+
 const SECURITY_HEADERS: Record<string, string> = {
-  // No form-action: browsers apply it to the redirect after a form post, and the consent form
-  // redirects on to GitHub or the MCP client's own redirect URI.
-  "Content-Security-Policy":
-    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store",
 };
 
+/** An HTML response with the security headers and the given CSP (unless `init` sets one). */
+export function htmlResponse(
+  doc: string,
+  csp: string,
+  init: { status?: number; headers?: HeadersInit } = {},
+): Response {
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  if (!headers.has("Content-Security-Policy")) headers.set("Content-Security-Policy", csp);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!headers.has(k)) headers.set(k, v);
+  return new Response(doc, { status: init.status ?? 200, headers });
+}
+
+/** A standalone page for the OAuth consent flow and sign-up refusals (STANDALONE_CSP). */
 export function page(
   title: string,
   body: Raw,
@@ -64,10 +91,7 @@ code{background:#eef;padding:0 .25rem}
 ${body}
 </body>
 </html>`;
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "text/html; charset=utf-8");
-  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!headers.has(k)) headers.set(k, v);
-  return new Response(doc.value, { status: init.status ?? 200, headers });
+  return htmlResponse(doc.value, STANDALONE_CSP, init);
 }
 
 export function errorPage(status: number, title: string, message: string): Response {

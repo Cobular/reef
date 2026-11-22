@@ -209,22 +209,35 @@ export function rpcRequest(method: string, params: Record<string, unknown> = {},
   });
 }
 
+/** Sends one JSON-RPC request to /mcp as an already-authorised account, bypassing the OAuth layer. */
+export async function rpcAs(
+  user: { userId: number; login: string },
+  method: string,
+  params: Record<string, unknown> = {},
+  workerEnv: Env = testEnv(),
+  handler = mcpApiHandler(TEST_PART_SIZE),
+) {
+  const ctx = createExecutionContext();
+  const authed = Object.assign(Object.create(ctx), { props: user }) as ExecutionContext;
+  const rpc = await readRpc(await handler.fetch(rpcRequest(method, params), workerEnv, authed));
+  if (rpc.error) throw new Error(`JSON-RPC error ${rpc.error.code}: ${rpc.error.message}`);
+  return rpc.result ?? {};
+}
+
 /** Calls an MCP tool as an already-authorised account, bypassing the OAuth layer. */
 export async function callTool(
   user: { userId: number; login: string },
   name: string,
   args: Record<string, unknown> = {},
   workerEnv: Env = testEnv(),
+  handler = mcpApiHandler(TEST_PART_SIZE),
 ): Promise<{ text: string; isError: boolean }> {
-  const ctx = createExecutionContext();
-  const authed = Object.assign(Object.create(ctx), { props: user }) as ExecutionContext;
-  const response = await mcpApiHandler(TEST_PART_SIZE).fetch(
-    rpcRequest("tools/call", { name, arguments: args }),
+  const result = (await rpcAs(
+    user,
+    "tools/call",
+    { name, arguments: args },
     workerEnv,
-    authed,
-  );
-  const rpc = await readRpc(response);
-  if (rpc.error) throw new Error(`JSON-RPC error ${rpc.error.code}: ${rpc.error.message}`);
-  const result = rpc.result as { content: { text: string }[]; isError?: boolean };
+    handler,
+  )) as { content: { text: string }[]; isError?: boolean };
   return { text: result.content.map((c) => c.text).join("\n"), isError: result.isError === true };
 }

@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { addUser, callTool, fileRow, ORIGIN, resetDb, testEnv } from "./helpers";
+import { mcpApiHandler } from "../src/mcp/server";
+import {
+  addUser,
+  callTool,
+  fileRow,
+  ORIGIN,
+  resetDb,
+  rpcAs,
+  TEST_PART_SIZE,
+  testEnv,
+} from "./helpers";
 
 const alice = { userId: 1, login: "alice" };
 const bob = { userId: 2, login: "bob" };
@@ -140,5 +150,33 @@ describe("get_download, list_files, share_file, delete_file", () => {
     const again = await callTool(alice, "get_download", { file_id: id });
     expect(again.isError).toBe(true);
     expect((await callTool(alice, "list_files")).text).toContain("gone since");
+  });
+});
+
+describe("one handler serving many requests", () => {
+  it("keeps each request's caller apart, in turn and at once", async () => {
+    const handler = mcpApiHandler(TEST_PART_SIZE);
+    const env = testEnv();
+    const listed = (await rpcAs(alice, "tools/list", {}, env, handler)) as {
+      tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[];
+    };
+    const upload = listed.tools.find((t) => t.name === "create_upload");
+    expect(Object.keys(upload?.inputSchema.properties ?? {})).toContain("share_with");
+    // The second listing comes from the cached JSON Schema and must match the first.
+    expect(await rpcAs(bob, "tools/list", {}, env, handler)).toEqual(listed);
+
+    const mine = await callTool(alice, "create_upload", { name: "a.txt", size: 1 }, env, handler);
+    const id = field(mine.text, /Reef handoff: id=(\S+)/);
+    expect((await callTool(bob, "list_files", {}, env, handler)).text).not.toContain(id);
+
+    const [a, b, c] = await Promise.all([
+      callTool(alice, "list_files", {}, env, handler),
+      callTool(bob, "list_files", {}, env, handler),
+      callTool(carol, "create_upload", { name: "c.txt", size: 1 }, env, handler),
+    ]);
+    expect(a.text).toContain(id);
+    expect(b.text).toContain("You have no Reef files");
+    expect(c.isError).toBe(false);
+    expect((await callTool(bob, "get_download", { file_id: id }, env, handler)).isError).toBe(true);
   });
 });

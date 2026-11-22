@@ -8,13 +8,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --infer-origin-from-routes=false --upstream-protocol http",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types --env-file .dev.vars.example"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

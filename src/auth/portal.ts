@@ -7,8 +7,8 @@ import {
 } from "../config";
 import { getUser } from "../files/repo";
 import { randomToken, timingSafeEqualStrings } from "../lib/crypto";
-import { errorPage, html, page } from "../lib/html";
-import { clearCookie, getCookie, redirect, setCookie } from "../lib/http";
+import { errorPage } from "../lib/html";
+import { clearCookie, getCookie, redirect, safeNext, setCookie } from "../lib/http";
 import { logError } from "../lib/log";
 import { type GitHubApi, pkceChallenge } from "./github";
 import { signValue, verifyValue } from "./signed";
@@ -30,14 +30,21 @@ export async function portalSession(request: Request, env: Env): Promise<PortalS
   return { userId: user.id, login: user.login };
 }
 
-/** GET /login: start GitHub sign-in with a signed, short-lived state + PKCE cookie. */
-export async function startLogin(env: Env, github: GitHubApi): Promise<Response> {
+/**
+ * GET /login: start GitHub sign-in with a signed, short-lived state + PKCE cookie. `next` (a
+ * same-origin path, already checked with `safeNext`) rides in the cookie to the callback.
+ */
+export async function startLogin(
+  env: Env,
+  github: GitHubApi,
+  next: string | null = null,
+): Promise<Response> {
   const state = randomToken();
   const verifier = randomToken();
   const cookie = await signValue(
     env.COOKIE_SECRET,
     "login",
-    { s: state, v: verifier },
+    { s: state, v: verifier, ...(next ? { n: next } : {}) },
     Date.now() + STATE_TTL_SECONDS * 1000,
   );
   const location = github.authorizeUrl({
@@ -111,26 +118,14 @@ export async function finishLogin(
     { uid: admission.userId },
     Date.now() + SESSION_TTL_SECONDS * 1000,
   );
-  const headers = new Headers({ Location: "/portal", "Cache-Control": "no-store" });
+  const next = typeof saved.n === "string" ? safeNext(saved.n) : null;
+  const headers = new Headers({ Location: next ?? "/files", "Cache-Control": "no-store" });
   headers.append("Set-Cookie", clearCookie(PORTAL_STATE_COOKIE));
   headers.append("Set-Cookie", setCookie(SESSION_COOKIE, session, SESSION_TTL_SECONDS));
   return new Response(null, { status: 302, headers });
 }
 
-/** GET /portal: signed-in placeholder; the real portal is a later milestone. */
-export async function portalPage(request: Request, env: Env): Promise<Response> {
-  const session = await portalSession(request, env);
-  if (!session) return redirect("/login");
-  return page(
-    "Reef",
-    html`<p>Signed in as <strong>${session.login}</strong>.</p>
-      <p>The file portal is coming soon. Until then, use Reef from an agent session through its
-        MCP connector at <code>${publicOrigin(env)}/mcp</code>.</p>
-      <form method="post" action="/logout"><button type="submit">Sign out</button></form>`,
-  );
-}
-
-/** POST /logout. SameSite=Lax keeps cross-site posts from carrying the cookie anyway. */
+/** Ends the portal session: POST /logout (the portal router checks CSRF first). */
 export function logout(): Response {
   return redirect("/", { "Set-Cookie": clearCookie(SESSION_COOKIE) }, 303);
 }

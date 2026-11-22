@@ -87,8 +87,8 @@ describe("creating and running schools", () => {
     const listed = await listSchoolsFor(ctx(), alice.userId);
     const dm = listed.find((s) => s.id === pair.school.id);
     expect(dm?.members).toEqual([
-      { login: "alice", accepted: true },
-      { login: "bob", accepted: false },
+      { id: alice.userId, login: "alice", accepted: true },
+      { id: bob.userId, login: "bob", accepted: false },
     ]);
     const invite = (await listSchoolsFor(ctx(), bob.userId))[0];
     expect(invite).toMatchObject({ id: pair.school.id, accepted: false, createdBy: "alice" });
@@ -394,6 +394,22 @@ describe("sending", () => {
       { fileId: up.file.id, name: "notes.txt", key: up.key, gone: false },
     ]);
     expect(read.messages[1]?.attachments[0]?.key).toBeNull();
+  });
+
+  it("counts pending invitees when checking an attached file's share list", async () => {
+    const created = await createSchool(ctx(), alice.userId, "team", "group", ["bob", "carol"]);
+    const id = created.school.id;
+    await acceptInvite(ctx(), bob.userId, id);
+    const h = await join(alice);
+    const up = await readyFile(alice, ["bob"]);
+    const attach = [{ file_id: up.file.id, key: up.key }];
+
+    const missing = await refusal(sendMessage(ctx(), alice.userId, h, id, "file", attach));
+    expect(missing.status).toBe(403);
+    expect(missing.message).toContain("carol (invited)");
+
+    await shareFile(filesContext(testEnv(), TEST_PART_SIZE), alice, up.file.id, ["carol"], []);
+    expect((await sendMessage(ctx(), alice.userId, h, id, "file", attach)).seq).toBe(1);
   });
 });
 

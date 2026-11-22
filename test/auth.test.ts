@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { pkceChallenge } from "../src/auth/github";
+import { csrfToken } from "../src/portal/csrf";
 import {
   addUser,
   call,
@@ -63,9 +64,10 @@ beforeEach(async () => {
 
 // ---- portal sign-in ------------------------------------------------------------------------
 
-async function portalLogin(code: string, workerEnv = testEnv()) {
+async function portalLogin(code: string, workerEnv = testEnv(), next?: string) {
   const jar = new Jar();
-  const start = await call(worker, req("/login"), workerEnv);
+  const login = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
+  const start = await call(worker, req(login), workerEnv);
   expect(start.status).toBe(302);
   jar.take(start);
   const github = new URL(start.headers.get("Location") ?? "");
@@ -85,7 +87,7 @@ describe("portal sign-in", () => {
   it("signs in an invited account (login matched case-insensitively) and sets a session", async () => {
     const { jar, back, github } = await portalLogin("alice");
     expect(back.status).toBe(302);
-    expect(back.headers.get("Location")).toBe("/portal");
+    expect(back.headers.get("Location")).toBe("/files");
     expect(jar.has("__Host-reef-session")).toBe(true);
     expect(back.headers.getSetCookie().join("\n")).toMatch(/HttpOnly; Secure; SameSite=Lax/);
 
@@ -95,7 +97,7 @@ describe("portal sign-in", () => {
       github.searchParams.get("code_challenge"),
     );
 
-    const portal = await call(worker, req("/portal", jar));
+    const portal = await call(worker, req("/files", jar));
     expect(portal.status).toBe(200);
     expect(await portal.text()).toContain("alice");
     const user = await env.DB.prepare("SELECT login FROM users WHERE id = 101").first();
@@ -125,9 +127,9 @@ describe("portal sign-in", () => {
   it("refuses banned accounts at sign-in and ends their sessions at once", async () => {
     const { jar } = await portalLogin("alice");
     await env.DB.prepare("UPDATE users SET banned = 1 WHERE id = 101").run();
-    const portal = await call(worker, req("/portal", jar));
-    expect(portal.status).toBe(302);
-    expect(portal.headers.get("Location")).toBe("/login");
+    const portal = await call(worker, req("/files", jar));
+    expect(portal.status).toBe(303);
+    expect(portal.headers.get("Location")).toBe("/login?next=%2Ffiles");
     const again = await portalLogin("alice");
     expect(again.back.status).toBe(403);
     expect(await again.back.text()).toMatch(/suspended/i);
@@ -141,13 +143,31 @@ describe("portal sign-in", () => {
     expect(user?.login).toBe("alice-new");
   });
 
-  it("signs out", async () => {
+  it("returns to the page that asked for sign-in, and only to a local path", async () => {
+    const asked = await call(worker, req("/schools"));
+    expect(asked.headers.get("Location")).toBe("/login?next=%2Fschools");
+    const { back } = await portalLogin("alice", testEnv(), "/schools");
+    expect(back.headers.get("Location")).toBe("/schools");
+    for (const evil of ["//evil.example", "https://evil.example", "/\\evil.example"]) {
+      const { back: refused } = await portalLogin("alice", testEnv(), evil);
+      expect(refused.headers.get("Location")).toBe("/files");
+    }
+  });
+
+  it("signs out with the form token", async () => {
     const { jar } = await portalLogin("alice");
-    const out = await call(worker, req("/logout", jar, { method: "POST" }));
+    const form = { "Content-Type": "application/x-www-form-urlencoded" };
+    const forged = await call(worker, req("/logout", jar, { method: "POST", headers: form }));
+    expect(forged.status).toBe(403);
+    const csrf = await csrfToken(testEnv(), 101);
+    const out = await call(
+      worker,
+      req("/logout", jar, { method: "POST", headers: form, body: `csrf=${csrf}` }),
+    );
     expect(out.status).toBe(303);
     jar.take(out);
     expect(jar.has("__Host-reef-session")).toBe(false);
-    expect((await call(worker, req("/portal", jar))).status).toBe(302);
+    expect((await call(worker, req("/files", jar))).status).toBe(303);
   });
 
   it("serves the landing page and 404s elsewhere", async () => {

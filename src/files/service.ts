@@ -13,6 +13,7 @@ import { generateKey, parseKey } from "./key";
 import {
   canAccess,
   type FileRow,
+  fileWithShares,
   findUsersByLogins,
   getFile,
   getUser,
@@ -232,12 +233,19 @@ export async function getDownload(
 
 export type ListedStatus = "uploading" | "ready" | "gone";
 
+export interface Account {
+  id: number;
+  login: string;
+}
+
 export interface ListedFileView {
   file: ListedFile;
   status: ListedStatus;
   minutesLeft: number | null;
   downloadsLeft: number | null;
   shares: string[];
+  /** The share list with account IDs (for avatars), in the same order as `shares`. */
+  shareAccounts: Account[];
 }
 
 /** "gone" covers expired, deleted and limit-reached-then-expired files alike. */
@@ -247,26 +255,69 @@ export function fileStatus(file: FileRow, now: number): ListedStatus {
   return "gone";
 }
 
+function fileView(file: ListedFile, accounts: Account[], now: number): ListedFileView {
+  const status = fileStatus(file, now);
+  return {
+    file,
+    status,
+    minutesLeft:
+      status === "ready" && file.expires_at !== null
+        ? Math.ceil((file.expires_at - now) / 60_000)
+        : null,
+    downloadsLeft:
+      file.download_limit === null ? null : Math.max(0, file.download_limit - file.download_count),
+    shares: accounts.map((a) => a.login),
+    shareAccounts: accounts,
+  };
+}
+
 export async function listFiles(ctx: FilesContext, caller: Caller): Promise<ListedFileView[]> {
-  const rows = await listFilesFor(ctx.env.DB, caller.userId, ctx.now - ROW_RETENTION_MS);
-  return Promise.all(
-    rows.map(async (file) => {
-      const status = fileStatus(file, ctx.now);
-      return {
-        file,
-        status,
-        minutesLeft:
-          status === "ready" && file.expires_at !== null
-            ? Math.ceil((file.expires_at - ctx.now) / 60_000)
-            : null,
-        downloadsLeft:
-          file.download_limit === null
-            ? null
-            : Math.max(0, file.download_limit - file.download_count),
-        shares: await shareLogins(ctx.env.DB, file.id),
-      };
-    }),
+  const { files, shares } = await listFilesFor(
+    ctx.env.DB,
+    caller.userId,
+    ctx.now - ROW_RETENTION_MS,
   );
+  const byFile = new Map<string, Account[]>();
+  for (const s of shares) {
+    const list = byFile.get(s.file_id) ?? [];
+    list.push({ id: s.user_id, login: s.login });
+    byFile.set(s.file_id, list);
+  }
+  return files.map((file) => fileView(file, byFile.get(file.id) ?? [], ctx.now));
+}
+
+/**
+ * One file the caller owns or is shared on, with its share list, in one round trip. A missing
+ * file and one the caller may not see get the same 404.
+ */
+export async function fileDetails(
+  ctx: FilesContext,
+  caller: Caller,
+  fileId: string,
+): Promise<ListedFileView> {
+  const found = /^[a-z0-9]{1,64}$/.test(fileId)
+    ? await fileWithShares(ctx.env.DB, fileId)
+    : { file: null, shares: [] };
+  const { file, shares } = found;
+  if (
+    !file ||
+    (file.owner_id !== caller.userId && !shares.some((s) => s.user_id === caller.userId))
+  )
+    throw new ReefError(404, `No file ${fileId} that you own or are shared on.`);
+  return fileView(
+    file,
+    shares.map((s) => ({ id: s.user_id, login: s.login })),
+    ctx.now,
+  );
+}
+
+/** Loads a file for a signed-in download; the bytes then go out through `streamDownload`. */
+export function downloadableFile(
+  ctx: FilesContext,
+  caller: Caller,
+  fileId: string,
+): Promise<FileRow> {
+  return accessibleFile(ctx, caller, fileId);
 }
 
 export async function shareFile(
