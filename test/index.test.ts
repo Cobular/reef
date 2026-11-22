@@ -39,3 +39,22 @@ it("uploads and downloads through the deployed entry point", async () => {
   );
   expect(query.status).toBe(400);
 });
+
+it("serves 503 in maintenance mode but keeps the data API closed too", async () => {
+  const { createWorker } = await import("../src/worker");
+  const { env } = await import("cloudflare:workers");
+  const worker = createWorker({ github: {} as never });
+  const ctx = {
+    waitUntil() {},
+    passThroughOnException() {},
+    props: {},
+  } as unknown as ExecutionContext;
+  for (const path of ["/", "/mcp", "/up/x", "/dl/x"]) {
+    const res = await worker.fetch(
+      new Request(`https://reef.cobular.com${path}`),
+      { ...env, MAINTENANCE: "1" },
+      ctx,
+    );
+    expect(res.status).toBe(503);
+  }
+});

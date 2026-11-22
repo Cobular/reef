@@ -19,6 +19,8 @@
   "vars": {
     "SIGNUP_MODE": "invite",
     "PUBLIC_ORIGIN": "https://reef.cobular.com"
+    // MAINTENANCE is not set here: the security-gate workflow deploys with --var MAINTENANCE:1,
+    // and any normal deploy removes it again.
   },
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "reef-files" }],
   "d1_databases": [

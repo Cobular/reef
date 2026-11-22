@@ -83,6 +83,9 @@ export function createWorker(deps: WorkerDeps) {
 
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+      // Fail closed: the security gate redeploys with MAINTENANCE=1 when a production dependency
+      // has a known high or critical vulnerability. The cleanup cron keeps running.
+      if (env.MAINTENANCE === "1") return maintenance();
       const data = await handleData(request, env, partSize);
       if (data) return data;
       return oauthFor(env).provider.fetch(request, env, ctx);
@@ -111,5 +114,19 @@ function landing(env: Env): Response {
         are encrypted with a key Reef does not keep, and reach only accounts on their share list.</p>
       <p>Connect an agent to <code>${publicOrigin(env)}/mcp</code>, or
         <a href="/login">sign in with GitHub</a>.</p>`,
+  );
+}
+
+function maintenance(): Response {
+  return new Response(
+    "Reef is offline while a security update is applied. Files expire as usual. Try again later.\n",
+    {
+      status: 503,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "retry-after": "3600",
+        "cache-control": "no-store",
+      },
+    },
   );
 }

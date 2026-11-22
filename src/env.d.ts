@@ -5,6 +5,8 @@ interface ReefSecrets {
   GITHUB_CLIENT_SECRET: string;
   TOKEN_SIGNING_KEY: string;
   COOKIE_SECRET: string;
+  /** "1" puts the Worker in fail-closed maintenance mode (see the security-gate workflow). */
+  MAINTENANCE?: string;
 }
 
 declare namespace Cloudflare {
