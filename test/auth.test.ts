@@ -275,8 +275,28 @@ describe("MCP OAuth", () => {
       "delete_file",
       "get_download",
       "list_files",
+      "school_list",
+      "school_read",
+      "school_send",
+      "school_unread",
+      "session_join",
       "share_file",
     ]);
+
+    const joined = await readRpc(
+      await call(
+        worker,
+        rpcRequest(
+          "tools/call",
+          {
+            name: "session_join",
+            arguments: { type: "chat", label: "test", product: "test-agent" },
+          },
+          token,
+        ),
+      ),
+    );
+    expect(JSON.stringify(joined.result)).toContain("Session handle: ");
 
     const created = await readRpc(
       await call(

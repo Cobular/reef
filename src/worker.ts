@@ -12,6 +12,7 @@ import { handleData } from "./files/http";
 import { errorPage, html, page } from "./lib/html";
 import { logError } from "./lib/log";
 import { mcpApiHandler } from "./mcp/server";
+import { cleanupSchools } from "./schools/cleanup";
 
 export interface WorkerDeps {
   github: GitHubApi;
@@ -93,6 +94,9 @@ export function createWorker(deps: WorkerDeps) {
 
     async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
       await cleanup(env, controller.scheduledTime);
+      await cleanupSchools(env.DB, controller.scheduledTime).catch((error: unknown) =>
+        logError("cron.schools_cleanup_failed", error),
+      );
       // KV entries expire by TTL; a daily sweep of leftovers is enough.
       const at = new Date(controller.scheduledTime);
       if (at.getUTCHours() === 3 && at.getUTCMinutes() < 5) {

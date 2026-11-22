@@ -13,6 +13,27 @@ export const LIMITS = {
   maxFileNameLength: 255,
 } as const;
 
+/** School limits from DESIGN.md "Schools". */
+export const SCHOOL_LIMITS = {
+  maxGroupMembers: 20,
+  maxSchoolNameLength: 100,
+  /** Message text, measured in UTF-8 bytes. */
+  maxMessageBytes: 8 * 1024,
+  maxMessagesPerAccountPerMinute: 60,
+  maxAttachments: 5,
+  messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
+  /** Sessions not seen for this long are deleted, with their read positions. */
+  sessionRetentionMs: 90 * 24 * 60 * 60 * 1000,
+  defaultReadLimit: 50,
+  maxReadLimit: 200,
+  maxLabelLength: 100,
+  maxProductLength: 64,
+} as const;
+
+/** Session types a session may declare in session_join (DESIGN.md "Session type"). */
+export const SESSION_TYPES = ["chat", "local_coding", "hosted_coding", "persistent_agent"] as const;
+export type SessionType = (typeof SESSION_TYPES)[number];
+
 /** 90 MiB: the single-PUT ceiling and the multipart part size. */
 export const PART_SIZE = 94_371_840;
 

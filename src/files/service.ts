@@ -77,7 +77,7 @@ export interface CreatedUpload {
   shareWith: string[];
 }
 
-function uniqueLogins(logins: string[]): string[] {
+export function uniqueLogins(logins: string[]): string[] {
   const seen = new Map<string, string>();
   for (const raw of logins) {
     const login = raw.trim().replace(/^@/, "");
