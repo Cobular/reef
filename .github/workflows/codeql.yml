@@ -12,8 +12,6 @@ permissions:
 
 jobs:
   analyze:
-    # Needs GitHub code security on this private repo; set repo variable ENABLE_GHAS=true once enabled.
-    if: vars.ENABLE_GHAS == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
