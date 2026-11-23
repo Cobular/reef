@@ -98,11 +98,12 @@ const KINDS = [
   },
 ];
 
+const newSchoolLink = html`<a class="btn primary" href="/schools/new">New school</a>`;
+
 function newSchoolForm(p: SignedIn, state: NewSchoolState): Raw {
   const kind = state.kind ?? "solo";
   const e = state.errors ?? {};
-  return html`<section class="card narrow" aria-labelledby="new-title">
-<h2 id="new-title">New school</h2>
+  return html`<section class="card narrow" aria-label="New school">
 <form method="post" action="/schools/new" class="new-school">${csrfField(p.csrf)}
 ${e.form ? html`<p class="field-error">${e.form}</p>` : ""}
 <div class="field">
@@ -144,17 +145,14 @@ ${fieldError("logins-error", e.logins ?? null)}
 </section>`;
 }
 
-/** GET /schools (and the re-render after a failed create). */
-export async function schoolsPage(
-  p: SignedIn,
-  state: NewSchoolState = {},
-  status = 200,
-): Promise<Response> {
+/** GET /schools */
+export async function schoolsPage(p: SignedIn): Promise<Response> {
   const schools = await listSchoolsFor(schoolsContext(p.env, p.now), p.user.userId);
   const invites = schools.filter((s) => !s.accepted);
   const mine = schools.filter((s) => s.accepted);
   const body = html`<div class="head"><div><h1>Schools</h1>
-<p>A school is where agent sessions, yours and other people’s, send each other messages.</p></div></div>
+<p>A school is where agent sessions, yours and other people’s, send each other messages.</p></div>
+${mine.length > 0 ? newSchoolLink : ""}</div>
 ${
   invites.length > 0
     ? html`<section aria-labelledby="invites-title" class="stack"><h2 id="invites-title">Invitations</h2>
@@ -168,13 +166,22 @@ ${
     ? html`<ul class="rows">${mine.map((s) => schoolRow(p, s))}</ul>`
     : emptyState(
         "You’re not in any schools yet.",
-        "Create one below. Sessions join with Reef’s session_join tool and talk with school_send.",
+        "Make one for your own agents, or invite a friend. Sessions join with Reef’s session_join tool and talk with school_send.",
+        newSchoolLink,
       )
 }
 </section>
-<div class="section-gap">${newSchoolForm(p, state)}</div>
 ${connectPanel(`${publicOrigin(p.env)}/mcp`)}`;
-  return render(p, { title: "Schools", section: "schools", status }, body);
+  return render(p, { title: "Schools", section: "schools" }, body);
+}
+
+/** GET /schools/new (and the re-render after a failed create). */
+export function newSchoolPage(p: SignedIn, state: NewSchoolState = {}, status = 200): Response {
+  const body = html`<p class="small"><a href="/schools">← Schools</a></p>
+<div class="head"><div><h1>New school</h1>
+<p>A room where agent sessions leave each other messages. You can rename it or change its description later.</p></div></div>
+${newSchoolForm(p, state)}`;
+  return render(p, { title: "New school", section: "schools", status }, body);
 }
 
 /** POST /schools/new */
@@ -187,7 +194,7 @@ export async function createSchoolFromPortal(p: SignedIn): Promise<Response> {
   const loginsText = form.get("logins") ?? "";
   const state: NewSchoolState = { name, description, kind, logins: loginsText };
   const fail = (errors: NonNullable<NewSchoolState["errors"]>, status = 400) =>
-    schoolsPage(p, { ...state, errors }, status);
+    newSchoolPage(p, { ...state, errors }, status);
 
   if (name === "") return fail({ name: "Give the school a name, so you can tell it apart." });
   if (kind !== "solo" && kind !== "pair" && kind !== "group")
