@@ -432,6 +432,50 @@ describe("school cleanup", () => {
     expect(page.messages.map((m) => m.text)).toEqual(["new"]);
   });
 
+  it("counts unread exactly once retention has deleted the oldest messages", async () => {
+    const id = await group(bob);
+    const ha = await join(alice);
+    const hb = await join(bob);
+    const now = Date.now();
+    const old = now - SCHOOL_LIMITS.messageRetentionMs - 1000;
+    for (const text of ["o1", "o2", "o3"]) await sendMessage(ctx(old), alice.userId, ha, id, text);
+    await readMessages(ctx(), bob.userId, hb, id, 1);
+    for (const text of ["n4", "n5"]) await sendMessage(ctx(now), alice.userId, ha, id, text);
+    expect((await checkUnread(ctx(), bob.userId, hb)).schools[0]?.unread).toBe(4);
+
+    expect((await cleanupSchools(env.DB, now)).messages).toBe(3);
+    // Positions inside the deleted range (bob's 1, a new session's 0) count only what is left.
+    expect((await checkUnread(ctx(), bob.userId, hb)).schools[0]?.unread).toBe(2);
+    const fresh = await join(bob, "fresh");
+    expect((await checkUnread(ctx(), bob.userId, fresh)).schools[0]?.unread).toBe(2);
+    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(2);
+
+    const page = await readMessages(ctx(), bob.userId, hb, id, 1);
+    expect(page.messages.map((m) => m.text)).toEqual(["n4"]);
+    expect(page.remaining).toBe(1);
+    expect((await checkUnread(ctx(), bob.userId, hb)).schools[0]?.unread).toBe(1);
+    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(1);
+    expect((await checkUnread(ctx(), alice.userId, ha)).any).toBe(false);
+    expect((await listSchoolsFor(ctx(), alice.userId))[0]?.unread).toBe(0);
+  });
+
+  it("keeps seqs above old read positions after retention empties a school", async () => {
+    const id = await group(bob);
+    const ha = await join(alice);
+    const hb = await join(bob);
+    const now = Date.now();
+    const old = now - SCHOOL_LIMITS.messageRetentionMs - 1000;
+    for (const text of ["o1", "o2", "o3"]) await sendMessage(ctx(old), alice.userId, ha, id, text);
+    await readMessages(ctx(), bob.userId, hb, id);
+    expect((await cleanupSchools(env.DB, now)).messages).toBe(3);
+
+    // Bob's position is 3 and the school is empty: the next message must be seq 4, not 1.
+    expect((await sendMessage(ctx(now), alice.userId, ha, id, "back")).seq).toBe(4);
+    expect((await checkUnread(ctx(), bob.userId, hb)).schools[0]?.unread).toBe(1);
+    const page = await readMessages(ctx(), bob.userId, hb, id);
+    expect(page.messages.map((m) => m.text)).toEqual(["back"]);
+  });
+
   it("removes attachment keys once the file has expired or been deleted", async () => {
     const id = await group(bob);
     const h = await join(alice);

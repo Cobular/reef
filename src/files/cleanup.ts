@@ -56,10 +56,10 @@ export async function cleanup(env: Env, now = Date.now()): Promise<CleanupResult
       `DELETE FROM upload_parts
        WHERE file_id NOT IN (SELECT id FROM files WHERE state = 'pending')`,
     ),
+    // markDeleted always sets expires_at, so this matches the rows COALESCE(expires_at,
+    // created_at) would, while using the (state, expires_at) index range.
     db
-      .prepare(
-        "DELETE FROM files WHERE state = 'deleted' AND COALESCE(expires_at, created_at) <= ?",
-      )
+      .prepare("DELETE FROM files WHERE state = 'deleted' AND expires_at <= ?")
       .bind(now - ROW_RETENTION_MS),
   ]);
   const result = {

@@ -55,6 +55,21 @@ function typeMatch(typeSql: string): string {
   return `instr(sm.session_types, '"' || ${typeSql} || '"') > 0`;
 }
 
+/**
+ * SQL for the number of a school's messages with seq above `positionSql`, without counting rows.
+ * Seqs are dense per school (insertMessage allocates MAX + 1) and messages are deleted only from
+ * the old end (retention) or with the school, so the count is newest seq minus the larger of the
+ * position and (oldest seq - 1). Each end is one primary-key seek; ORDER BY ... LIMIT 1 is used
+ * because the planner's MIN/MAX shortcut is not guaranteed with a WHERE clause. Clamped at 0.
+ */
+function unreadAfter(schoolSql: string, positionSql: string): string {
+  const newest = `COALESCE((SELECT seq FROM messages WHERE school_id = ${schoolSql}
+    ORDER BY seq DESC LIMIT 1), 0)`;
+  const oldest = `COALESCE((SELECT seq FROM messages WHERE school_id = ${schoolSql}
+    ORDER BY seq LIMIT 1), 1)`;
+  return `MAX(0, ${newest} - MAX(${positionSql}, ${oldest} - 1))`;
+}
+
 // ---- schools and members -------------------------------------------------------------------
 
 export function getMembership(
@@ -203,9 +218,7 @@ export async function listMemberships(
     db
       .prepare(
         `SELECT l.*,
-           CASE WHEN l.accepted = 1 THEN
-             (SELECT COUNT(*) FROM messages m WHERE m.school_id = l.id AND m.seq > l.read_seq)
-           ELSE 0 END AS unread
+           CASE WHEN l.accepted = 1 THEN ${unreadAfter("l.id", "l.read_seq")} ELSE 0 END AS unread
          FROM (
            SELECT sc.*, sm.accepted, sm.session_types, cu.login AS created_by_login,
              (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
@@ -341,11 +354,11 @@ export async function unreadFor(
     db
       .prepare(
         `SELECT s.type, sc.id AS school_id, sc.name,
-           CASE WHEN sc.id IS NULL THEN 0 ELSE
-             (SELECT COUNT(*) FROM messages m WHERE m.school_id = sc.id AND m.seq > COALESCE(
-               (SELECT last_seq FROM read_positions
-                WHERE session_handle = s.handle AND school_id = sc.id), 0))
-           END AS unread
+           CASE WHEN sc.id IS NULL THEN 0 ELSE ${unreadAfter(
+             "sc.id",
+             `COALESCE((SELECT last_seq FROM read_positions
+                WHERE session_handle = s.handle AND school_id = sc.id), 0)`,
+           )} END AS unread
          FROM sessions s
          LEFT JOIN school_members sm
            ON sm.user_id = s.user_id AND sm.accepted = 1 AND ${typeMatch("s.type")}
@@ -442,8 +455,7 @@ export async function readAfterPosition(
       .bind(schoolId, handle, userId, limit),
     db
       .prepare(
-        `SELECT COUNT(*) AS n FROM messages
-         WHERE school_id = ?1 AND seq > ${READ_POSITION} AND ${MAY_READ}`,
+        `SELECT CASE WHEN ${MAY_READ} THEN ${unreadAfter("?1", READ_POSITION)} ELSE 0 END AS n`,
       )
       .bind(schoolId, handle, userId),
   ]);
@@ -486,7 +498,9 @@ export interface NewMessage {
 /**
  * Inserts a message and returns its seq, or null if a guard failed: the school is paused, the
  * sender's member row is not accepted or does not include the session type, or the sender hit
- * the rate limit. The seq is allocated inside this single INSERT ... SELECT (MAX(seq) + 1),
+ * the rate limit. The seq is allocated inside this single INSERT ... SELECT: one above the
+ * highest of the newest seq and any read position (so a school emptied by retention never reuses
+ * seqs that sessions have already read past),
  * which D1 runs atomically, so concurrent sends get unique, dense numbers.
  */
 export async function insertMessage(
@@ -499,7 +513,8 @@ export async function insertMessage(
     .prepare(
       `INSERT INTO messages (school_id, seq, sender_id, session_type, product, label, text,
          attachments, created_at)
-       SELECT ?1, COALESCE((SELECT MAX(seq) FROM messages WHERE school_id = ?1), 0) + 1,
+       SELECT ?1, MAX(COALESCE((SELECT MAX(seq) FROM messages WHERE school_id = ?1), 0),
+         COALESCE((SELECT MAX(last_seq) FROM read_positions WHERE school_id = ?1), 0)) + 1,
          ?2, ?3, ?4, ?5, ?6, ?7, ?8
        WHERE EXISTS (SELECT 1 FROM schools WHERE id = ?1 AND paused = 0)
          AND EXISTS (SELECT 1 FROM school_members sm WHERE sm.school_id = ?1 AND sm.user_id = ?2

@@ -79,6 +79,9 @@ export const DOWNLOAD_TOKEN_TTL_MS = 60 * 1000;
 /** Rows stay this long after expiry so recently expired files can still be listed. */
 export const ROW_RETENTION_MS = 24 * 60 * 60 * 1000;
 
+/** MCP OAuth access tokens (the library's default is an hour). */
+export const ACCESS_TOKEN_TTL_SECONDS = 24 * 60 * 60;
+
 export const SESSION_COOKIE = "__Host-reef-session";
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const PORTAL_STATE_COOKIE = "__Host-reef-login";

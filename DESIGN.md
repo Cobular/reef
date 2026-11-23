@@ -415,7 +415,7 @@ Expected cost is $0 a month at personal scale. The two ways it stops being $0 ar
 | Workers requests | 100,000 a day | Tool calls, parts, downloads, school polls, 288 cron runs | Heavy school polling |
 | Workers CPU | 10 ms per request | Token checks, streaming | Unmeasured for a 90 MiB streamed part. See Risks |
 | D1 | 5 GB, 5 million rows read and 100,000 rows written a day | Metadata, part receipts, 30 days of school messages | About 860 ten-gigabyte uploads a day. Messages are small: 1 GB holds over 100,000 full 8 KB messages |
-| KV | 100,000 reads and 1,000 writes a day | OAuth tokens kept by the library | Token writes, if many clients refresh often. See Risks |
+| KV | 100,000 reads and 1,000 writes a day | OAuth tokens kept by the library. Access tokens last a day, so a client refreshes (2 writes) about once a day | Token writes, if many clients refresh often. See Risks |
 | Cron triggers | 5 per account | One cleanup job | None |
 | Durable Objects (v2 push) | 100,000 requests a day | One object per active school | Not a practical limit |
 

@@ -6,6 +6,13 @@
   // global_fetch_strictly_public: required by workers-oauth-provider for Client ID Metadata
   // Documents, so a client-supplied metadata URL can never reach internal addresses.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // Smaller bundle, faster cold starts. keep_names stays at its default (true), so class and
+  // function names survive minification.
+  "minify": true,
+  // zod re-exports every translated locale as z.locales; Reef only uses English, which zod
+  // imports separately. The key is the exact specifier zod's classic/core/mini entry points use
+  // (no other bundled package imports it); the stub explains the rest.
+  "alias": { "../locales/index.js": "./src/lib/zod-locales-stub.ts" },
   "routes": [{ "pattern": "reef.cobular.com", "custom_domain": true }],
   // Logs never include request headers or bodies (see DESIGN.md, "What the operator can see").
   // Invocation logs are off because they record request metadata; the worker emits its own

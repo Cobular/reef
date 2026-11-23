@@ -108,7 +108,10 @@ export async function markReady(db: D1Database, id: string, now: number): Promis
   return row?.expires_at ?? null;
 }
 
-/** Marks a file deleted and clamps its expiry to now, so listings show when it went. */
+/**
+ * Marks a file deleted and clamps its expiry to now, so listings show when it went. This always
+ * leaves expires_at set; the cleanup purge (`state = 'deleted' AND expires_at <= ?`) relies on it.
+ */
 export async function markDeleted(db: D1Database, ids: string[], now: number) {
   if (ids.length === 0) return;
   await db.batch(
@@ -304,11 +307,18 @@ export async function setBanned(
 
 // ---- quotas --------------------------------------------------------------------------------
 
-/** Bytes held by files that are not deleted (pending uploads count at their declared size). */
+/**
+ * Bytes held by files that are not deleted (pending uploads count at their declared size).
+ * `state IN ('pending', 'ready')` is the same set as `state != 'deleted'` (a CHECK constraint
+ * allows only these three), but lets the service-wide sum use the files_state_* indexes instead
+ * of scanning every row, deleted ones included.
+ */
 export async function residentBytes(db: D1Database, ownerId?: number): Promise<number> {
   const stmt =
     ownerId === undefined
-      ? db.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM files WHERE state != 'deleted'")
+      ? db.prepare(
+          "SELECT COALESCE(SUM(size), 0) AS n FROM files WHERE state IN ('pending', 'ready')",
+        )
       : db
           .prepare(
             "SELECT COALESCE(SUM(size), 0) AS n FROM files WHERE state != 'deleted' AND owner_id = ?",

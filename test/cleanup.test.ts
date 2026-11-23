@@ -1,4 +1,4 @@
-import { createExecutionContext, createScheduledController } from "cloudflare:test";
+import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { cleanup, STALE_UPLOAD_MS } from "../src/files/cleanup";
@@ -76,7 +76,7 @@ describe("cron cleanup", () => {
       scheduledTime: Date.now(),
       cron: "*/5 * * * *",
     });
-    await testWorker().scheduled(controller, testEnv(), createExecutionContext());
+    await testWorker().scheduled(controller, testEnv());
     expect((await fileRow(id))?.state).toBe("deleted");
   });
 });

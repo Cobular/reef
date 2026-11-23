@@ -70,6 +70,11 @@ describe("create_upload", () => {
 
     const badKey = await callTool(alice, "create_upload", { name: "a.txt", size: 1, key: "short" });
     expect(badKey.isError).toBe(true);
+
+    // zod's own messages: English, though the bundle drops zod's other locales.
+    const badSize = await callTool(alice, "create_upload", { name: "a.txt", size: "big" });
+    expect(badSize.isError).toBe(true);
+    expect(badSize.text).toContain("size: Invalid input: expected number, received string");
   });
 
   it("refuses files over 10 GB", async () => {
