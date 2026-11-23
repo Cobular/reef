@@ -6,7 +6,7 @@ import {
 import type { GitHubApi } from "./auth/github";
 import { finishMcpLogin, MCP_CALLBACK_PATH, showConsent, submitConsent } from "./auth/mcp";
 import { finishLogin, PORTAL_CALLBACK_PATH } from "./auth/portal";
-import { PART_SIZE, publicOrigin } from "./config";
+import { ACCESS_TOKEN_TTL_SECONDS, PART_SIZE, publicOrigin } from "./config";
 import { cleanup } from "./files/cleanup";
 import { handleData } from "./files/http";
 import { guardRequest, withSecurityHeaders } from "./guard";
@@ -68,6 +68,10 @@ export function createWorker(deps: WorkerDeps) {
         tokenEndpoint: "/oauth/token",
         clientRegistrationEndpoint: "/oauth/register",
         clientIdMetadataDocumentEnabled: true,
+        // A day, not the library's hour: each refresh writes KV twice and Free allows 1,000 KV
+        // writes a day. Bans and account deletion still apply at once, because the MCP handler
+        // looks the account up in D1 on every request.
+        accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
         resourceMetadata: { resource: `${origin}/mcp`, resource_name: "Reef" },
       };
       entry = { options, provider: new OAuthProvider(options) };
@@ -88,21 +92,14 @@ export function createWorker(deps: WorkerDeps) {
       return withSecurityHeaders(await oauthFor(env).provider.fetch(guarded, env, ctx));
     },
 
-    async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    async scheduled(controller: ScheduledController, env: Env) {
       await cleanup(env, controller.scheduledTime);
       await cleanupSchools(env.DB, controller.scheduledTime).catch((error: unknown) =>
         logError("cron.schools_cleanup_failed", error),
       );
-      // KV entries expire by TTL; a daily sweep of leftovers is enough.
-      const at = new Date(controller.scheduledTime);
-      if (at.getUTCHours() === 3 && at.getUTCMinutes() < 5) {
-        ctx.waitUntil(
-          oauthFor(env)
-            .provider.purgeExpiredData(env)
-            .then(() => undefined)
-            .catch((error: unknown) => logError("cron.oauth_purge_failed", error)),
-        );
-      }
+      // No OAuth KV sweep: every record the library writes (tokens, grants, client
+      // registrations, transactions) carries a KV expiry, so purgeExpiredData would only find
+      // stragglers while spending KV list and read operations.
     },
   } satisfies ExportedHandler<Env>;
 }

@@ -26,4 +26,13 @@ export default defineConfig({
   test: {
     setupFiles: ["./test/apply-migrations.ts"],
   },
+  // Same as "alias" in wrangler.jsonc, so tests run against the bundle's zod without locales.
+  resolve: {
+    alias: [
+      {
+        find: /^\.\.\/locales\/index\.js$/,
+        replacement: path.join(__dirname, "src/lib/zod-locales-stub.ts"),
+      },
+    ],
+  },
 });
