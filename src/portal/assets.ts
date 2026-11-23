@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "c0723b8743";
+export const ASSET_VERSION = "76869eed15";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -190,9 +190,8 @@ td:last-child,th:last-child{text-align:right}
 .connect-panel{max-width:40rem}
 .connect-panel .copy{margin-bottom:8px}
 .landing{padding-bottom:16px}
-.hero{max-width:46rem;padding:48px 0 48px}
-.hero h1{font-size:42px;line-height:1.1;letter-spacing:-.035em;margin-bottom:16px}
-.lede{font-size:18px;color:var(--muted);margin-bottom:28px;max-width:40rem}
+.hero{display:flex;flex-direction:column;justify-content:center;max-width:52rem;min-height:calc(100svh - 92px);padding:0 0 64px}
+.hero h1{font-size:56px;line-height:1.05;letter-spacing:-.04em;margin-bottom:32px;text-wrap:balance}
 .hero-actions{display:flex;flex-wrap:wrap;gap:8px}
 .facts svg,.demo-name svg{flex:none;color:var(--sea)}
 .half{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px;align-items:center;padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:16px}
@@ -226,7 +225,7 @@ td:last-child,th:last-child{text-align:right}
 .steps li::before{content:counter(step);position:absolute;left:0;top:-1px;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--bg);font-size:13px;font-weight:650}
 .steps strong{display:block;color:var(--ink)}
 .steps .copy{margin-top:12px}
-@media (max-width:720px){.wrap{padding:0 16px}.top-in{flex-wrap:wrap;gap:0 16px;padding-top:10px}.nav{order:3;width:100%;margin:6px -10px 4px}.me-login{display:none}.main{padding-top:24px}.row{grid-template-columns:1fr;gap:12px;padding:16px}.row.file,.row.link{grid-template-columns:1fr}.row-actions{justify-content:flex-start}.row.file .row-actions{justify-content:flex-end}.confirm-panel{right:auto;left:0}.row.file .confirm-panel{left:auto;right:0}.split{grid-template-columns:1fr}.kv{grid-template-columns:1fr;gap:2px}.kv dd{margin-bottom:10px}.copy{flex-direction:column;align-items:stretch}.hero{padding:16px 0 40px}.hero h1{font-size:32px}.lede{font-size:17px}@media (max-width:420px){.seg label{padding:8px 10px;font-size:14px}}
+@media (max-width:720px){.wrap{padding:0 16px}.top-in{flex-wrap:wrap;gap:0 16px;padding-top:10px}.nav{order:3;width:100%;margin:6px -10px 4px}.me-login{display:none}.main{padding-top:24px}.row{grid-template-columns:1fr;gap:12px;padding:16px}.row.file,.row.link{grid-template-columns:1fr}.row-actions{justify-content:flex-start}.row.file .row-actions{justify-content:flex-end}.confirm-panel{right:auto;left:0}.row.file .confirm-panel{left:auto;right:0}.split{grid-template-columns:1fr}.kv{grid-template-columns:1fr;gap:2px}.kv dd{margin-bottom:10px}.copy{flex-direction:column;align-items:stretch}.hero{min-height:calc(100svh - 132px);padding:0 0 40px}.hero h1{font-size:38px}@media (max-width:420px){.seg label{padding:8px 10px;font-size:14px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 `;
 
