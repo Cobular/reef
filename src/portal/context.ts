@@ -1,6 +1,6 @@
 import { type PortalSession, portalSession } from "../auth/portal";
 import { signValue, verifyValue } from "../auth/signed";
-import { FLASH_COOKIE, FLASH_TTL_SECONDS, isAdmin } from "../config";
+import { FLASH_COOKIE, FLASH_TTL_SECONDS, isAdmin, MAX_FORM_BODY_BYTES } from "../config";
 import { clearCookie, getCookie, setCookie } from "../lib/http";
 import { csrfOk, csrfToken } from "./csrf";
 
@@ -84,16 +84,14 @@ export async function seeOther(
   return new Response(null, { status: 303, headers });
 }
 
-const MAX_FORM_BYTES = 16 * 1024;
-
-/** A posted form (urlencoded, small) or null if it is not one. */
+/** A posted form (urlencoded, small) or null if it is not one. The Worker refuses larger bodies with 413 first. */
 export async function readForm(request: Request): Promise<URLSearchParams | null> {
   const type = request.headers.get("Content-Type") ?? "";
   if (!type.startsWith("application/x-www-form-urlencoded")) return null;
   const declared = Number(request.headers.get("Content-Length") ?? "0");
-  if (declared > MAX_FORM_BYTES) return null;
+  if (declared > MAX_FORM_BODY_BYTES) return null;
   const body = await request.text();
-  if (body.length > MAX_FORM_BYTES) return null;
+  if (body.length > MAX_FORM_BODY_BYTES) return null;
   return new URLSearchParams(body);
 }
 

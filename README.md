@@ -85,12 +85,23 @@ R2 accepts SSE-C keys but ignores them, so the tests emulate SSE-C at the storag
    pnpm exec wrangler kv namespace create OAUTH_KV
    ```
 2. Add an R2 lifecycle rule on `reef-files` as a backstop to the cron job: delete objects after
-   1 day and abort incomplete multipart uploads after 1 day.
-3. Create a GitHub OAuth App (Settings, Developer settings, OAuth Apps) with homepage
+   1 day and abort incomplete multipart uploads after 1 day. An object lives about an hour at
+   most (a 30-minute upload window plus a lifetime of up to 30 minutes), so the rule only catches
+   objects the cron job missed.
+   ```sh
+   pnpm exec wrangler r2 bucket lifecycle add reef-files reef-backstop --expire-days 1 --abort-multipart-days 1
+   pnpm exec wrangler r2 bucket lifecycle list reef-files
+   ```
+   The rule has no prefix, so it covers the whole bucket. New buckets come with a default rule
+   that aborts multipart uploads after 7 days; the 1-day rule is the stricter one and can sit
+   alongside it. In the dashboard: R2, `reef-files`, Settings, Object lifecycle rules.
+3. Check the rate limit `namespace_id`s in `wrangler.jsonc` (7301 to 7305). They must be unique
+   across the Cloudflare account, so change them if another Worker already uses those numbers.
+4. Create a GitHub OAuth App (Settings, Developer settings, OAuth Apps) with homepage
    `https://reef.cobular.com` and callback URL `https://reef.cobular.com/auth/callback`. GitHub
    accepts any path under the registered callback, and Reef uses `/auth/callback/mcp` and
    `/auth/callback/portal`. Reef asks for no scopes.
-4. Set the secrets:
+5. Set the secrets:
    ```sh
    pnpm exec wrangler secret put GITHUB_CLIENT_ID
    pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
@@ -99,7 +110,7 @@ R2 accepts SSE-C keys but ignores them, so the tests emulate SSE-C at the storag
    ```
    Rotating `TOKEN_SIGNING_KEY` voids outstanding upload and download links; rotating
    `COOKIE_SECRET` signs everyone out of the portal.
-5. Apply the schema and deploy:
+6. Apply the schema and deploy:
    ```sh
    pnpm exec wrangler d1 migrations apply reef --remote
    pnpm run deploy
@@ -121,6 +132,16 @@ pnpm exec wrangler d1 execute reef --remote --command "UPDATE users SET banned =
 
 To connect an agent, add `https://reef.cobular.com/mcp` as a remote MCP server in the client.
 It signs in through the browser with GitHub.
+
+## Rate and size limits
+
+Workers Rate Limiting bindings (`RL_*` in `wrangler.jsonc`, values in `RATE_LIMITS` in
+`src/config.ts`) refuse floods with 429 and `Retry-After: 60`. They count per Cloudflare
+location and are approximate. Per IP (`CF-Connecting-IP`): 300 requests a minute in total, 30 a
+minute to sign-in and OAuth endpoints. Per account: 240 MCP requests, 30 changes (portal posts
+and `create_upload`) and 200 `/up` or `/dl` requests a minute. A rate-limited MCP tool call
+returns a tool error, so the agent sees the message. Form posts are capped at 64 KiB and MCP
+bodies at 1 MiB (413). If a limit trips for real use, raise it in both files and redeploy.
 
 ## Schools
 

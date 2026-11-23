@@ -33,7 +33,16 @@
       "migrations_dir": "migrations"
     }
   ],
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "2f2f246f111e48a699e356b7f800f0ad" }]
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "2f2f246f111e48a699e356b7f800f0ad" }],
+  // Request rate limits (src/config.ts RATE_LIMITS holds the same numbers; a test compares them).
+  // Per key per Cloudflare location, approximate. namespace_id must be unique in the account.
+  "ratelimits": [
+    { "name": "RL_IP", "namespace_id": "7301", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RL_AUTH", "namespace_id": "7302", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_MCP", "namespace_id": "7303", "simple": { "limit": 240, "period": 60 } },
+    { "name": "RL_WRITE", "namespace_id": "7304", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_DATA", "namespace_id": "7305", "simple": { "limit": 200, "period": 60 } }
+  ]
   // Secrets (wrangler secret put): GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, TOKEN_SIGNING_KEY, COOKIE_SECRET
   // Their types are declared in src/env.d.ts so typegen output does not depend on a local .dev.vars.
 }

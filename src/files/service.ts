@@ -36,6 +36,8 @@ export class ReefError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Seconds, sent as Retry-After where the refusal is an HTTP response. */
+    readonly retryAfter?: number,
   ) {
     super(message);
     this.name = "ReefError";

@@ -1,6 +1,7 @@
-import { publicOrigin } from "../config";
+import { publicOrigin, RATE_LIMITS } from "../config";
 import { text } from "../lib/http";
 import { logError, logEvent } from "../lib/log";
+import { limitMessage, overLimit } from "../lib/rate-limit";
 import { utc } from "./commands";
 import { parseKey } from "./key";
 import { fixedLengthBody } from "./limit-stream";
@@ -53,7 +54,12 @@ export async function handleData(
     if (request.method === "POST") return await download(request, ctx, token, true);
     return methodNotAllowed("GET, POST");
   } catch (error) {
-    if (error instanceof ReefError) return text(error.status, error.message);
+    if (error instanceof ReefError)
+      return text(
+        error.status,
+        error.message,
+        error.retryAfter ? { "Retry-After": String(error.retryAfter) } : {},
+      );
     if (error instanceof WrongKeyError) return text(403, "Wrong key for this file.");
     logError("data.error", error, { area });
     return text(500, "Internal error.");
@@ -67,6 +73,9 @@ function methodNotAllowed(allow: string): Response {
 async function authorise(ctx: FilesContext, token: string, action: "up" | "dl") {
   const claims = await verifyToken(ctx.env.TOKEN_SIGNING_KEY, token, action, ctx.now);
   if (!claims) throw new ReefError(401, "Token is invalid or has expired. Ask Reef for a new one.");
+  // Per account, after the (CPU-only) signature check and before any D1 or R2 work.
+  if (await overLimit(ctx.env, "data", String(claims.userId)))
+    throw new ReefError(429, limitMessage("data"), RATE_LIMITS.data.period);
   if (!(await isActiveUser(ctx.env.DB, claims.userId)))
     throw new ReefError(403, "This account is suspended.");
   return claims;

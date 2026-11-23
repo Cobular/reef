@@ -30,6 +30,39 @@ export const SCHOOL_LIMITS = {
   maxProductLength: 64,
 } as const;
 
+/**
+ * Request rate limits (DESIGN.md "Abuse and security"), enforced with Workers Rate Limiting
+ * bindings. Each counts per key per Cloudflare location and is approximate: a flood guard, not
+ * a quota. `binding` names the binding in wrangler.jsonc, whose `simple` block must hold the same
+ * limit and period (a unit test checks). The period can only be 10 or 60 seconds.
+ */
+export const RATE_LIMITS = {
+  /** Every request, per IP (CF-Connecting-IP). Hosted MCP clients share their vendor's IPs. */
+  ip: { binding: "RL_IP", limit: 300, period: 60 },
+  /** Sign-in and OAuth endpoints, per IP. */
+  auth: { binding: "RL_AUTH", limit: 30, period: 60 },
+  /** MCP requests, per account: several sessions polling school_unread every few seconds fit. */
+  mcp: { binding: "RL_MCP", limit: 240, period: 60 },
+  /** Portal form posts and create_upload calls, per account. */
+  write: { binding: "RL_WRITE", limit: 30, period: 60 },
+  /** `/up` and `/dl` requests, per account: a 10 GiB upload is 114 parts of 90 MiB. */
+  data: { binding: "RL_DATA", limit: 200, period: 60 },
+} as const;
+
+/** Paths that sign people in or issue OAuth tokens; they get the tighter per-IP `auth` limit. */
+export const AUTH_PATHS: readonly string[] = [
+  "/login",
+  "/authorize",
+  "/oauth/token",
+  "/oauth/register",
+  "/auth/callback/portal",
+  "/auth/callback/mcp",
+];
+
+/** Request bodies are refused with 413 past these sizes, before anything parses them. */
+export const MAX_FORM_BODY_BYTES = 64 * 1024;
+export const MAX_MCP_BODY_BYTES = 1024 * 1024;
+
 /** Session types a session may declare in session_join (DESIGN.md "Session type"). */
 export const SESSION_TYPES = ["chat", "local_coding", "hosted_coding", "persistent_agent"] as const;
 export type SessionType = (typeof SESSION_TYPES)[number];

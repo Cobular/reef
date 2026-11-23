@@ -21,11 +21,17 @@ export interface PortalSession {
   login: string;
 }
 
+/** The account ID in a valid session cookie, without touching D1 (for cheap rate limiting). */
+export async function sessionUserId(request: Request, env: Env): Promise<number | null> {
+  const data = await verifyValue(env.COOKIE_SECRET, "session", getCookie(request, SESSION_COOKIE));
+  return data && typeof data.uid === "number" ? data.uid : null;
+}
+
 /** Reads the session cookie and rechecks the account, so a ban takes effect at once. */
 export async function portalSession(request: Request, env: Env): Promise<PortalSession | null> {
-  const data = await verifyValue(env.COOKIE_SECRET, "session", getCookie(request, SESSION_COOKIE));
-  if (!data || typeof data.uid !== "number") return null;
-  const user = await getUser(env.DB, data.uid);
+  const uid = await sessionUserId(request, env);
+  if (uid === null) return null;
+  const user = await getUser(env.DB, uid);
   if (!user || user.banned) return null;
   return { userId: user.id, login: user.login };
 }

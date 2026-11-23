@@ -2,7 +2,49 @@ export function text(status: number, message: string, headers: HeadersInit = {})
   const h = new Headers(headers);
   h.set("Content-Type", "text/plain; charset=utf-8");
   h.set("Cache-Control", "no-store");
+  h.set("X-Content-Type-Options", "nosniff");
   return new Response(`${message}\n`, { status, headers: h });
+}
+
+/** A JSON response that is never cached or sniffed. */
+export function json(status: number, value: unknown, headers: HeadersInit = {}): Response {
+  const h = new Headers(headers);
+  h.set("Cache-Control", "no-store");
+  h.set("X-Content-Type-Options", "nosniff");
+  return Response.json(value, { status, headers: h });
+}
+
+/** True if a declared Content-Length is over `max`. */
+export function declaredOver(request: Request, max: number): boolean {
+  const header = request.headers.get("Content-Length");
+  return header !== null && Number(header) > max;
+}
+
+/**
+ * Reads a whole body, but at most `max` bytes: null if it is longer. For bodies sent without a
+ * Content-Length (chunked), which would otherwise be buffered whole by `text()` or `formData()`.
+ */
+export async function readCapped(body: ReadableStream<Uint8Array>, max: number) {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
 }
 
 export function redirect(location: string, headers: HeadersInit = {}, status = 302): Response {
