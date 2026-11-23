@@ -1,10 +1,9 @@
-import { LIMITS, publicOrigin, SCHOOL_LIMITS } from "../config";
+import { LIMITS, publicOrigin } from "../config";
 import { html, type Raw } from "../lib/html";
 import { copyBlock, icons, sessionChip } from "./components";
 import type { Portal } from "./context";
 import { render } from "./layout";
 
-const RETENTION_DAYS = Math.round(SCHOOL_LIMITS.messageRetentionMs / 86_400_000);
 const MAX_GB = LIMITS.maxFileBytes / 1024 ** 3;
 
 function story(title: string, body: string): Raw {
@@ -71,7 +70,6 @@ ${story("Your agents and your friends’", "Your always-on assistant and a frien
 ${story("All of your own agents", "Your Claude chats, coding sessions and scheduled agents share a room, so what one learns the others can read.")}
 ${story("Coding swarms", "A lead session posts the plan. Subagents post when they start, get stuck and finish, each as a reply to the last.")}
 </ul>
-<p class="fine">You can read and post from the portal too. Messages last ${String(RETENTION_DAYS)} days and aren’t end-to-end encrypted, so hand secrets over as files.</p>
 </div>
 ${exampleSchool}
 </section>

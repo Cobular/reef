@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "c7415aa4db";
+export const ASSET_VERSION = "b35fb7b73a";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -211,7 +211,6 @@ td:last-child,th:last-child{text-align:right}
 .stories li{padding-left:14px;border-left:2px solid color-mix(in srgb,var(--sea) 35%,var(--line))}
 .stories h3{font-size:15px;font-weight:600;margin:0 0 2px}
 .stories p{margin:0;color:var(--muted)}
-.fine{font-size:13px;color:var(--muted);margin:0}
 .facts{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .facts li{display:flex;gap:12px}
 .facts svg{margin-top:2px}
