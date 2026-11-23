@@ -5,7 +5,14 @@ import { ReefError, uniqueLogins } from "../files/service";
 import { utf8 } from "../lib/base64";
 import { randomId } from "../lib/crypto";
 import { logEvent } from "../lib/log";
-import type { MessageRow, SchoolKind, SchoolRow, SessionSchoolRow, StoredAttachment } from "./repo";
+import type {
+  MessageRow,
+  SchoolKind,
+  SchoolRow,
+  SenderType,
+  SessionSchoolRow,
+  StoredAttachment,
+} from "./repo";
 import * as repo from "./repo";
 
 /**
@@ -67,6 +74,20 @@ function textField(field: string, value: string, max: number): string {
   return trimmed;
 }
 
+/** Control characters other than line feed and tab. */
+const CONTROL_CHAR_BUT_LINES = /[^\P{Cc}\n\t]/u;
+
+/** A school description: trimmed, may be empty, may span lines (stored with \n only). */
+function descriptionField(value: string): string {
+  const max = SCHOOL_LIMITS.maxSchoolDescriptionLength;
+  const trimmed = value.replace(/\r\n?/g, "\n").trim();
+  if (trimmed.length > max)
+    throw new ReefError(400, `description must be at most ${max} characters`);
+  if (CONTROL_CHAR_BUT_LINES.test(trimmed))
+    throw new ReefError(400, "description must not contain control characters");
+  return trimmed;
+}
+
 // ---- schools -------------------------------------------------------------------------------
 
 async function membershipOf(ctx: SchoolsContext, actor: number, schoolId: string) {
@@ -113,7 +134,7 @@ export interface CreatedSchool {
 /**
  * Creates a school with the actor as its first accepted member. A pair has exactly one other
  * account; a group has up to 20 members in all, and may have none besides the actor (the "all
- * my sessions" school). Invitees join with accepted = 0.
+ * my sessions" school). Invitees join with accepted = 0. The description is optional.
  */
 export async function createSchool(
   ctx: SchoolsContext,
@@ -121,8 +142,10 @@ export async function createSchool(
   name: string,
   kind: SchoolKind,
   inviteLogins: string[] = [],
+  description = "",
 ): Promise<CreatedSchool> {
   const schoolName = textField("name", name, SCHOOL_LIMITS.maxSchoolNameLength);
+  const schoolDescription = descriptionField(description);
   if (kind !== "pair" && kind !== "group") throw new ReefError(400, "kind must be pair or group");
   const invitees = await resolveInvitees(ctx, actor, inviteLogins);
   if (kind === "pair" && invitees.length !== 1)
@@ -132,6 +155,7 @@ export async function createSchool(
   const school: SchoolRow = {
     id: randomId(),
     name: schoolName,
+    description: schoolDescription,
     kind,
     paused: 0,
     created_by: actor,
@@ -246,9 +270,52 @@ export function resumeSchool(ctx: SchoolsContext, actor: number, schoolId: strin
   return setPaused(ctx, actor, schoolId, false);
 }
 
+export interface SchoolDetails {
+  name: string;
+  description: string;
+  nameChanged: boolean;
+  descriptionChanged: boolean;
+}
+
+/**
+ * Renames a school and/or sets its description. Any accepted member may, like pause and resume.
+ * A field left out keeps its value; the name follows the create-time rules, and the description
+ * may be empty. Writes nothing when neither changes. Returns the stored (trimmed) values.
+ */
+export async function updateSchoolDetails(
+  ctx: SchoolsContext,
+  actor: number,
+  schoolId: string,
+  changes: { name?: string; description?: string },
+): Promise<SchoolDetails> {
+  const row = await acceptedMembershipOf(ctx, actor, schoolId);
+  const name =
+    changes.name === undefined
+      ? row.name
+      : textField("name", changes.name, SCHOOL_LIMITS.maxSchoolNameLength);
+  const description =
+    changes.description === undefined ? row.description : descriptionField(changes.description);
+  const result = {
+    name,
+    description,
+    nameChanged: name !== row.name,
+    descriptionChanged: description !== row.description,
+  };
+  if (!result.nameChanged && !result.descriptionChanged) return result;
+  await repo.updateSchoolDetails(ctx.db, row.id, { name, description });
+  logEvent("school.updated", {
+    school: row.id,
+    user: actor,
+    name: result.nameChanged,
+    description: result.descriptionChanged,
+  });
+  return result;
+}
+
 export interface SchoolListing {
   id: string;
   name: string;
+  description: string;
   kind: SchoolKind;
   paused: boolean;
   createdBy: string | null;
@@ -279,6 +346,7 @@ export async function listSchoolsFor(ctx: SchoolsContext, actor: number): Promis
   return schools.map((s) => ({
     id: s.id,
     name: s.name,
+    description: s.description,
     kind: s.kind,
     paused: s.paused === 1,
     createdBy: s.created_by_login,
@@ -307,12 +375,31 @@ export interface MessageView {
   seq: number;
   createdAt: number;
   sender: { id: number; login: string };
-  sessionType: SessionType;
+  /** The sending session's type, or "person" for a message written in the Reef portal. */
+  sessionType: SenderType;
   product: string;
   label: string;
   text: string;
   attachments: AttachmentView[];
   origin: MessageOrigin;
+  /** A person wrote it in the Reef portal; no agent session sent it. */
+  person: boolean;
+  /** The earlier message in the same school this one replies to, if any. */
+  replyTo: ReplyView | null;
+}
+
+/** Who wrote a replied-to message. Never its text: that would re-inject old content. */
+export interface ReplyView {
+  seq: number;
+  /** Null once retention has removed the replied-to message. */
+  parent: {
+    sender: { id: number; login: string };
+    sessionType: SenderType;
+    product: string;
+    label: string;
+    origin: MessageOrigin;
+    person: boolean;
+  } | null;
 }
 
 function parseAttachments(json: string): AttachmentView[] {
@@ -331,21 +418,43 @@ function parseAttachments(json: string): AttachmentView[] {
   }
 }
 
-function messageView(
-  row: MessageRow,
+type SessionKey = { type: string; product: string; label: string };
+
+function originOf(
+  sender: { id: number; type: string; product: string; label: string },
   actor: number,
-  session?: { type: string; product: string; label: string },
-): MessageView {
-  let origin: MessageOrigin = "other_account";
-  if (row.sender_id === actor) {
-    origin =
-      session &&
-      row.session_type === session.type &&
-      row.product === session.product &&
-      row.label === session.label
-        ? "this_session"
-        : "own_account";
-  }
+  session?: SessionKey,
+): MessageOrigin {
+  if (sender.id !== actor) return "other_account";
+  return session &&
+    sender.type === session.type &&
+    sender.product === session.product &&
+    sender.label === session.label
+    ? "this_session"
+    : "own_account";
+}
+
+function replyView(row: MessageRow, actor: number, session?: SessionKey): ReplyView | null {
+  if (row.reply_to === null) return null;
+  if (row.reply_sender_id === null || row.reply_session_type === null)
+    return { seq: row.reply_to, parent: null };
+  const type = row.reply_session_type;
+  const product = row.reply_product ?? "";
+  const label = row.reply_label ?? "";
+  return {
+    seq: row.reply_to,
+    parent: {
+      sender: { id: row.reply_sender_id, login: row.reply_sender_login ?? "" },
+      sessionType: type,
+      product,
+      label,
+      origin: originOf({ id: row.reply_sender_id, type, product, label }, actor, session),
+      person: type === repo.PERSON_SENDER,
+    },
+  };
+}
+
+function messageView(row: MessageRow, actor: number, session?: SessionKey): MessageView {
   return {
     seq: row.seq,
     createdAt: row.created_at,
@@ -355,7 +464,13 @@ function messageView(
     label: row.label,
     text: row.text,
     attachments: parseAttachments(row.attachments),
-    origin,
+    origin: originOf(
+      { id: row.sender_id, type: row.session_type, product: row.product, label: row.label },
+      actor,
+      session,
+    ),
+    person: row.session_type === repo.PERSON_SENDER,
+    replyTo: replyView(row, actor, session),
   };
 }
 
@@ -365,6 +480,8 @@ export interface TranscriptPage {
   messages: MessageView[];
   /** Pass as `before` for the next (older) page; null when there is none. */
   nextBefore: number | null;
+  /** The message `replyTo` asked for, wherever it is; null if none was asked for or it is gone. */
+  replyTarget: MessageView | null;
 }
 
 /** A page of a school's messages, newest first, for accepted members. Moves no read position. */
@@ -372,18 +489,25 @@ export async function transcript(
   ctx: SchoolsContext,
   actor: number,
   schoolId: string,
-  options: { before?: number; limit?: number } = {},
+  options: { before?: number; limit?: number; replyTo?: number } = {},
 ): Promise<TranscriptPage> {
   const row = await acceptedMembershipOf(ctx, actor, schoolId);
   const limit = readLimit(options.limit);
   const before = options.before ?? Number.MAX_SAFE_INTEGER;
-  const rows = await repo.messagesBefore(ctx.db, row.id, before, limit + 1);
+  const { messages: rows, also } = await repo.messagesBefore(
+    ctx.db,
+    row.id,
+    before,
+    limit + 1,
+    options.replyTo ?? null,
+  );
   const page = rows.slice(0, limit);
   const { accepted: _a, session_types: _t, ...school } = row;
   return {
     school,
     messages: page.map((m) => messageView(m, actor)),
     nextBefore: rows.length > limit ? (page[page.length - 1]?.seq ?? null) : null,
+    replyTarget: also ? messageView(also, actor) : null,
   };
 }
 
@@ -399,6 +523,7 @@ function readLimit(limit: number | undefined): number {
 export interface RoutedSchool {
   id: string;
   name: string;
+  description: string;
   kind: SchoolKind;
 }
 
@@ -438,7 +563,12 @@ export async function joinSession(
     cleanLabel,
     ctx.now,
   );
-  const toRef = (s: repo.RoutedSchoolRow) => ({ id: s.id, name: s.name, kind: s.kind });
+  const toRef = (s: repo.RoutedSchoolRow) => ({
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    kind: s.kind,
+  });
   return {
     handle: session.handle,
     type: session.type,
@@ -527,6 +657,34 @@ export async function readMessages(
   };
 }
 
+function rateLimited(): ReefError {
+  return new ReefError(
+    429,
+    `Message limit reached: ${SCHOOL_LIMITS.maxMessagesPerAccountPerMinute} messages per account per minute. Wait a minute, then send again.`,
+  );
+}
+
+/** Validates an optional reply_to; null when the message is not a reply. */
+function checkReplyTo(replyTo: number | undefined): number | null {
+  if (replyTo === undefined) return null;
+  if (!Number.isSafeInteger(replyTo) || replyTo < 1)
+    throw new ReefError(400, "reply_to must be a message's seq: a whole number from 1.");
+  return replyTo;
+}
+
+function noReplyTarget(
+  seq: number,
+  schoolId: string,
+  name: string | null,
+  advice: string,
+): ReefError {
+  const days = Math.round(SCHOOL_LIMITS.messageRetentionMs / 86_400_000);
+  return new ReefError(
+    400,
+    `No message with seq ${seq} in school ${schoolRef({ id: schoolId, name })} to reply to. It never existed there, or it is older than ${days} days and was removed. ${advice}`,
+  );
+}
+
 /** Throws the refusal a send would get, if any. */
 function assertCanSend(
   row: SessionSchoolRow | null,
@@ -545,11 +703,7 @@ function assertCanSend(
       403,
       `Session type ${ok.type} does not take part in school ${ref}. Your user can change which session types take part in the Reef portal.`,
     );
-  if (ok.recent >= SCHOOL_LIMITS.maxMessagesPerAccountPerMinute)
-    throw new ReefError(
-      429,
-      `Message limit reached: ${SCHOOL_LIMITS.maxMessagesPerAccountPerMinute} messages per account per minute. Wait a minute, then send again.`,
-    );
+  if (ok.recent >= SCHOOL_LIMITS.maxMessagesPerAccountPerMinute) throw rateLimited();
   return ok;
 }
 
@@ -558,7 +712,10 @@ export interface AttachmentInput {
   key?: string | undefined;
 }
 
-function checkText(text: string): void {
+function checkText(
+  text: string,
+  advice = "Split it, or upload it as a file with create_upload and attach it.",
+): void {
   const max = SCHOOL_LIMITS.maxMessageBytes;
   if (text.length === 0) throw new ReefError(400, "text must not be empty");
   // UTF-8 never uses fewer bytes than UTF-16 code units, so a long string fails before encoding.
@@ -566,7 +723,7 @@ function checkText(text: string): void {
   if (bytes > max)
     throw new ReefError(
       413,
-      `Message too long: the limit is ${max} bytes of UTF-8 text. Split it, or upload it as a file with create_upload and attach it.`,
+      `Message too long: the limit is ${max} bytes of UTF-8 text. ${advice}`,
     );
 }
 
@@ -627,14 +784,35 @@ export async function sendMessage(
   schoolId: string,
   text: string,
   attachments: AttachmentInput[] = [],
+  replyTo?: number,
 ): Promise<{ seq: number; school: { id: string; name: string } }> {
   checkHandle(handle);
   checkText(text);
   checkAttachmentShape(attachments);
+  const parent = checkReplyTo(replyTo);
   if (!ID_PATTERN.test(schoolId)) throw noSuchSchool(schoolId);
   const since = ctx.now - RATE_WINDOW_MS;
-  const load = () => repo.getSessionSchool(ctx.db, handle, actor, schoolId, ctx.now, since);
-  const row = assertCanSend(await load(), handle, schoolId);
+  const load = async () => {
+    const loaded = await repo.getSessionSchool(
+      ctx.db,
+      handle,
+      actor,
+      schoolId,
+      ctx.now,
+      since,
+      parent,
+    );
+    const ok = assertCanSend(loaded, handle, schoolId);
+    if (parent !== null && ok.reply_found !== 1)
+      throw noReplyTarget(
+        parent,
+        ok.school_id,
+        ok.name,
+        "Check the seq, or send without reply_to.",
+      );
+    return ok;
+  };
+  const row = await load();
   const stored =
     attachments.length > 0 ? await storedAttachments(ctx, actor, row, attachments) : [];
   const seq = await repo.insertMessage(
@@ -648,13 +826,15 @@ export async function sendMessage(
       text,
       attachments: stored.length > 0 ? JSON.stringify(stored) : "[]",
       createdAt: ctx.now,
+      replyTo: parent,
     },
     since,
     SCHOOL_LIMITS.maxMessagesPerAccountPerMinute,
   );
   if (seq === null) {
-    // Something changed between the check and the insert (a pause, a race to the rate limit).
-    assertCanSend(await load(), handle, schoolId);
+    // Something changed between the check and the insert (a pause, a race to the rate limit,
+    // retention removing the replied-to message).
+    await load();
     throw new ReefError(409, "The message was not sent. Try again.");
   }
   await repo.advancePastOwnMessage(ctx.db, handle, row.school_id, seq);
@@ -665,4 +845,69 @@ export async function sendMessage(
     files: stored.length,
   });
   return { seq, school: { id: row.school_id, name: row.name ?? "" } };
+}
+
+/** messages.product for a message a person wrote in the Reef portal. */
+export const PORTAL_PRODUCT = "reef-portal";
+
+/**
+ * Sends a message a person wrote in the Reef portal. The same rules as a session's send apply,
+ * except the session-type check (a person is not a session), and there are no attachments. It
+ * moves no read position, so the account's own sessions still see it as unread.
+ */
+export async function sendPortalMessage(
+  ctx: SchoolsContext,
+  actor: number,
+  schoolId: string,
+  text: string,
+  replyTo?: number,
+): Promise<{ seq: number; school: { id: string; name: string } }> {
+  if (!ID_PATTERN.test(schoolId)) throw noSuchSchool(schoolId);
+  const parent = checkReplyTo(replyTo);
+  // Browsers send textarea line breaks as CRLF; drop blank lines at either end, keep indentation.
+  const clean = text
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\s*\n/, "")
+    .trimEnd();
+  const since = ctx.now - RATE_WINDOW_MS;
+  const check = async () => {
+    const row = await repo.getPortalSendContext(ctx.db, schoolId, actor, since, parent);
+    if (!row) throw noSuchSchool(schoolId);
+    if (row.accepted !== 1)
+      throw new ReefError(403, `Accept the invite to school ${schoolRef(row)} first.`);
+    if (row.paused === 1)
+      throw new ReefError(
+        409,
+        `School ${schoolRef(row)} is paused, so no messages can be sent. Resume it to send.`,
+      );
+    if (row.recent >= SCHOOL_LIMITS.maxMessagesPerAccountPerMinute) throw rateLimited();
+    if (parent !== null && row.reply_found !== 1)
+      throw noReplyTarget(parent, row.id, row.name, "Send it as a plain message instead.");
+    return row;
+  };
+  const row = await check();
+  if (clean.length === 0) throw new ReefError(400, "Write a message first.");
+  checkText(clean, "Split it into shorter messages.");
+  const seq = await repo.insertMessage(
+    ctx.db,
+    {
+      schoolId: row.id,
+      senderId: actor,
+      sessionType: repo.PERSON_SENDER,
+      product: PORTAL_PRODUCT,
+      label: "",
+      text: clean,
+      attachments: "[]",
+      createdAt: ctx.now,
+      replyTo: parent,
+    },
+    since,
+    SCHOOL_LIMITS.maxMessagesPerAccountPerMinute,
+  );
+  if (seq === null) {
+    await check();
+    throw new ReefError(409, "The message was not sent. Try again.");
+  }
+  logEvent("school.message", { school: row.id, user: actor, seq, files: 0, portal: true });
+  return { seq, school: { id: row.id, name: row.name } };
 }

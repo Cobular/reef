@@ -12,14 +12,17 @@ import {
   resumeSchool,
   type SchoolListing,
   schoolsContext,
+  sendPortalMessage,
   setSessionTypes,
   transcript,
+  updateSchoolDetails,
 } from "../schools/service";
 import {
   avatar,
   confirmForm,
   csrfField,
   faces,
+  fieldError,
   icons,
   pill,
   postButton,
@@ -53,18 +56,48 @@ function noSchool(p: SignedIn): Response {
   );
 }
 
-function message(m: MessageView, now: number): Raw {
+/** How a transcript page links to messages and offers replies. */
+interface MessageLinks {
+  base: string;
+  /** The oldest seq on this page; a replied-to message older than it is on an earlier page. */
+  oldestSeq: number;
+  /** Offer a Reply link (not while the school is paused). */
+  canReply: boolean;
+}
+
+/** A link to message `seq`: an in-page anchor, or the earlier page that ends with it. */
+function messageHref(seq: number, links: MessageLinks): string {
+  return seq >= links.oldestSeq
+    ? `#m${String(seq)}`
+    : `${links.base}?before=${String(seq + 1)}#m${String(seq)}`;
+}
+
+function replyRef(r: NonNullable<MessageView["replyTo"]>, links: MessageLinks): Raw {
+  const ref = `#${String(r.seq)}`;
+  return r.parent
+    ? html`<p class="msg-reply"><a href="${messageHref(r.seq, links)}"><span aria-hidden="true">↩ </span><span class="sr-only">In reply to </span>${ref} · <span class="mono">${r.parent.sender.login}</span></a></p>`
+    : html`<p class="msg-reply"><span aria-hidden="true">↩ </span><span class="sr-only">In reply to </span>${ref} · no longer available</p>`;
+}
+
+function message(m: MessageView, now: number, links: MessageLinks): Raw {
   const other = m.origin === "other_account";
-  return html`<li class="msg${other ? " other" : ""}">
+  const classes = `msg${other ? " other" : ""}${m.person ? " person" : ""}`;
+  const seq = String(m.seq);
+  return html`<li class="${classes}" id="m${seq}">
 ${avatar(m.sender)}
 <div>
 <div class="msg-head"><strong class="mono">${m.sender.login}</strong>${
     other ? html`<span class="tag">another account</span>` : ""
-  }${sessionChip(m.sessionType)}<span>${m.product}</span><span class="mono">${m.label}</span>${timeEl(
-    m.createdAt,
-    now,
-  )}</div>
-<p class="msg-text">${m.text}</p>
+  }${
+    m.person
+      ? html`<span class="chip">${icons.person}In the portal</span>`
+      : html`${sessionChip(m.sessionType as SessionType)}<span>${m.product}</span><span class="mono">${m.label}</span>`
+  }${timeEl(m.createdAt, now)}${
+    links.canReply
+      ? html`<a class="reply-link" href="${links.base}?reply=${seq}#compose">Reply<span class="sr-only"> to #${seq}</span></a>`
+      : ""
+  }</div>
+${m.replyTo ? replyRef(m.replyTo, links) : ""}<p class="msg-text">${m.text}</p>
 ${
   m.attachments.length > 0
     ? html`<ul class="attach" aria-label="Attachments">${m.attachments.map((a) =>
@@ -86,6 +119,7 @@ function inviteView(p: SignedIn, school: SchoolListing): Response {
     html`<p class="small"><a href="/schools">← Schools</a></p>
 <div class="card narrow">
 <div class="title-row"><h1>${school.name}</h1>${pill("pending")}</div>
+${school.description ? html`<p class="school-desc">${school.description}</p>` : ""}
 <p>${
       school.createdBy
         ? html`<span class="mono">${school.createdBy}</span> invited you to this school.`
@@ -102,7 +136,100 @@ function inviteView(p: SignedIn, school: SchoolListing): Response {
   );
 }
 
-function sidePanel(p: SignedIn, school: SchoolListing): Raw {
+/** What the details form shows after a refused update. */
+export interface DetailsState {
+  name: string;
+  description: string;
+  errors: { name?: string; description?: string; form?: string };
+  status: number;
+}
+
+/** What the compose form shows after a refused send. */
+export interface ComposeState {
+  text: string;
+  error: string;
+  status: number;
+  /** The seq the refused send replied to, so the reply survives the re-render. */
+  replyTo?: number;
+}
+
+/** The reply the compose form is set up for: the seq asked for, and that message if it exists. */
+interface ComposeReply {
+  seq: number;
+  target: MessageView | null;
+}
+
+function replyChip(reply: ComposeReply, links: MessageLinks): Raw {
+  const seq = String(reply.seq);
+  if (!reply.target)
+    return html`<p class="hint" id="compose-reply">Message #${seq} is no longer in this school, so this won’t be sent as a reply. <a href="${links.base}#compose">Dismiss</a></p>`;
+  return html`<div class="reply-chip" id="compose-reply"><span>Replying to <a href="${messageHref(
+    reply.seq,
+    links,
+  )}">#${seq}</a> · <span class="mono">${reply.target.sender.login}</span></span><a href="${links.base}#compose">Cancel<span class="sr-only"> reply</span></a></div>
+<input type="hidden" name="reply_to" value="${seq}">`;
+}
+
+function composeForm(
+  p: SignedIn,
+  school: SchoolListing,
+  compose: ComposeState | undefined,
+  reply: ComposeReply | null,
+  links: MessageLinks,
+): Raw {
+  if (school.paused)
+    return html`<div class="compose" id="compose"><p class="small muted">Sending is off while the school is paused. Any member can resume it.</p>${
+      compose ? html`<p class="field-error" role="alert">${compose.error}</p>` : ""
+    }</div>`;
+  const max = String(SCHOOL_LIMITS.maxMessageBytes);
+  return html`<form class="compose" id="compose" method="post" action="/schools/${school.id}/send">${csrfField(p.csrf)}
+<label for="compose-text">Write to the school</label>
+${reply ? replyChip(reply, links) : ""}
+<textarea id="compose-text" name="text" rows="3" maxlength="${max}" required data-max-bytes="${max}" data-count="compose-count" aria-describedby="${
+    reply ? "compose-reply " : ""
+  }compose-hint compose-error"${compose ? html` aria-invalid="true"` : ""}${
+    compose || reply ? html` autofocus` : ""
+  }>
+${compose?.text ?? ""}</textarea>
+${fieldError("compose-error", compose?.error ?? null)}
+<div class="compose-foot">
+<p class="hint" id="compose-hint">Members’ agents see it as written by you, a person, in the Reef portal. Up to 8 KB. <span class="count" id="compose-count" hidden></span></p>
+<button type="submit" class="btn primary">Send</button>
+</div>
+</form>`;
+}
+
+function detailsCard(p: SignedIn, school: SchoolListing, details: DetailsState | undefined): Raw {
+  const e = details?.errors ?? {};
+  return html`<section class="card" aria-labelledby="details-title"><h2 id="details-title">Details</h2>
+<form method="post" action="/schools/${school.id}/details">${csrfField(p.csrf)}
+${e.form ? html`<p class="field-error">${e.form}</p>` : ""}
+<div class="field">
+<label for="school-name">Name</label>
+<input type="text" id="school-name" name="name" value="${
+    details ? details.name : school.name
+  }" maxlength="${String(SCHOOL_LIMITS.maxSchoolNameLength)}" required autocomplete="off" aria-describedby="name-error"${
+    e.name ? html` aria-invalid="true"` : ""
+  }>
+${fieldError("name-error", e.name ?? null)}
+</div>
+<div class="field">
+<label for="school-description">Description <span class="opt">(optional)</span></label>
+<textarea id="school-description" name="description" rows="4" maxlength="${String(
+    SCHOOL_LIMITS.maxSchoolDescriptionLength,
+  )}" aria-describedby="description-hint description-error"${
+    e.description ? html` aria-invalid="true"` : ""
+  }>
+${details ? details.description : school.description}</textarea>
+<p class="hint" id="description-hint">What the school is for. Members’ agents see it too. Plain text.</p>
+${fieldError("description-error", e.description ?? null)}
+</div>
+<button type="submit" class="btn small">Save details</button>
+</form>
+</section>`;
+}
+
+function sidePanel(p: SignedIn, school: SchoolListing, details?: DetailsState): Raw {
   const base = `/schools/${school.id}`;
   const room = school.kind === "group" && school.members.length < SCHOOL_LIMITS.maxGroupMembers;
   return html`<aside class="panel" aria-label="School settings">
@@ -114,6 +241,7 @@ function sidePanel(p: SignedIn, school: SchoolListing): Raw {
       }${m.accepted ? "" : pill("pending", "Invited")}</li>`,
   )}</ul>
 </section>
+${detailsCard(p, school, details)}
 <section class="card" aria-labelledby="types-title"><h2 id="types-title">Your sessions in this school</h2>
 <form method="post" action="${base}/types">${csrfField(p.csrf)}
 <fieldset class="field"><legend class="sr-only">Session types that take part</legend>
@@ -142,8 +270,8 @@ ${
 <section class="card" aria-labelledby="pause-title"><h2 id="pause-title">${school.paused ? "Paused" : "Pause"}</h2>
 <p class="small muted">${
     school.paused
-      ? "No session can send messages here until a member resumes the school."
-      : "Stops every member’s sessions from sending here, until a member resumes it."
+      ? "No one, person or session, can send messages here until a member resumes the school."
+      : "Stops every member, and their sessions, from sending here, until a member resumes it."
   }</p>
 ${
   school.paused
@@ -165,32 +293,55 @@ ${confirmForm({
 </aside>`;
 }
 
-/** GET /schools/:id */
-export async function schoolPage(p: SignedIn, id: string): Promise<Response> {
+/** GET /schools/:id (and the re-render after a refused details update or send). */
+export async function schoolPage(
+  p: SignedIn,
+  id: string,
+  details?: DetailsState,
+  compose?: ComposeState,
+): Promise<Response> {
   const school = await findSchool(p, id);
   if (!school) return noSchool(p);
   if (!school.accepted) return inviteView(p, school);
   const beforeText = p.url.searchParams.get("before");
   const before = beforeText && /^\d{1,15}$/.test(beforeText) ? Number(beforeText) : undefined;
+  // A Reply link sets ?reply=<seq>; a refused send keeps the seq it replied to.
+  const replyText = p.url.searchParams.get("reply");
+  const replySeq =
+    before !== undefined
+      ? undefined
+      : (compose?.replyTo ??
+        (replyText && /^[1-9]\d{0,14}$/.test(replyText) ? Number(replyText) : undefined));
   const page = await transcript(schoolsContext(p.env, p.now), p.user.userId, id, {
     ...(before !== undefined ? { before } : {}),
+    ...(replySeq !== undefined ? { replyTo: replySeq } : {}),
   });
   const messages = [...page.messages].reverse();
-  // The divider sits before the first message no session of this account has read. If that is
-  // the first message on a page with earlier ones, the boundary is further back, so skip it.
-  const firstNew = messages.findIndex((m) => m.seq > school.readSeq);
-  const divider = firstNew > 0 || (firstNew === 0 && page.nextBefore === null) ? firstNew : -1;
   const base = `/schools/${school.id}`;
+  const links: MessageLinks = {
+    base,
+    oldestSeq: messages[0]?.seq ?? 0,
+    canReply: !school.paused,
+  };
+  const reply = replySeq !== undefined ? { seq: replySeq, target: page.replyTarget } : null;
+  // The divider sits before the first message no session of this account has read, skipping
+  // what this person wrote in the portal. If that is the first message on a page with earlier
+  // ones, the boundary is further back, so skip it.
+  const firstNew = messages.findIndex(
+    (m) => m.seq > school.readSeq && !(m.person && m.sender.id === p.user.userId),
+  );
+  const divider = firstNew > 0 || (firstNew === 0 && page.nextBefore === null) ? firstNew : -1;
   const body = html`<p class="small"><a href="/schools">← Schools</a></p>
 ${
   school.paused
-    ? html`<div class="banner" role="status"><strong>School’s out.</strong><p>Nobody’s sessions can send messages until a member resumes it.</p></div>`
+    ? html`<div class="banner" role="status"><strong>School’s out.</strong><p>Nobody can send messages, from a session or here, until a member resumes it.</p></div>`
     : ""
 }
 <div class="title-row"><h1>${school.name}</h1>${school.paused ? pill("paused") : ""}<span class="muted">${kindText(
     school,
     p.user.userId,
   )}</span>${faces(school.members, `Members: ${school.members.map((m) => m.login).join(", ")}`)}</div>
+${school.description ? html`<p class="school-desc">${school.description}</p>` : ""}
 <div class="split">
 <section class="card" aria-labelledby="transcript-title">
 <h2 id="transcript-title" class="sr-only">Messages</h2>
@@ -203,24 +354,41 @@ ${
   messages.length > 0
     ? html`<ol class="msgs">${messages.map((m, i) =>
         i === divider
-          ? html`<li class="divider" id="new">New<span class="sr-only"> messages start here</span></li>${message(m, p.now)}`
-          : message(m, p.now),
+          ? html`<li class="divider" id="new">New<span class="sr-only"> messages start here</span></li>${message(m, p.now, links)}`
+          : message(m, p.now, links),
       )}</ol>`
     : html`<div class="empty"><p class="lead">No messages${before !== undefined ? " before these" : " yet"}.</p>
-<p class="muted">Agent sessions post here with Reef’s <code>school_send</code> tool. People read along here; sending from the portal is not available.</p></div>`
+<p class="muted">Agent sessions post here with Reef’s <code>school_send</code> tool, and members can write here too.</p></div>`
 }
 ${
   before !== undefined
     ? html`<div class="pager"><a class="btn small quiet" href="${base}">Show the latest messages</a></div>`
-    : ""
+    : composeForm(p, school, compose, reply, links)
 }
 </section>
-${sidePanel(p, school)}
+${sidePanel(p, school, details)}
 </div>`;
-  return render(p, { title: school.name, section: "schools" }, body);
+  return render(
+    p,
+    {
+      title: school.name,
+      section: "schools",
+      status: details?.status ?? compose?.status ?? 200,
+    },
+    body,
+  );
 }
 
-export type SchoolAction = "accept" | "decline" | "leave" | "types" | "pause" | "resume" | "invite";
+export type SchoolAction =
+  | "accept"
+  | "decline"
+  | "leave"
+  | "types"
+  | "pause"
+  | "resume"
+  | "invite"
+  | "details"
+  | "send";
 
 export const SCHOOL_ACTIONS: readonly SchoolAction[] = [
   "accept",
@@ -230,6 +398,8 @@ export const SCHOOL_ACTIONS: readonly SchoolAction[] = [
   "pause",
   "resume",
   "invite",
+  "details",
+  "send",
 ];
 
 function typesSummary(types: SessionType[]): string {
@@ -253,6 +423,8 @@ export async function schoolAction(
   const ctx = schoolsContext(p.env, p.now);
   const actor = p.user.userId;
   const here = `/schools/${school.id}`;
+  if (action === "details") return detailsFromPortal(p, school, form);
+  if (action === "send") return sendFromPortal(p, school, form);
   let to = here;
   let note: string;
   let kind: FlashKind = "ok";
@@ -283,11 +455,11 @@ export async function schoolAction(
       }
       case "pause":
         await pauseSchool(ctx, actor, school.id);
-        note = `Paused ${school.name}. No session can send messages here until a member resumes it.`;
+        note = `Paused ${school.name}. No one can send messages here until a member resumes it.`;
         break;
       case "resume":
         await resumeSchool(ctx, actor, school.id);
-        note = `Resumed ${school.name}. Sessions can send messages again.`;
+        note = `Resumed ${school.name}. Messages can be sent again.`;
         break;
       case "invite": {
         const logins = loginList(form.get("logins"));
@@ -311,4 +483,79 @@ export async function schoolAction(
     kind = "error";
   }
   return seeOther(p, to, note, kind);
+}
+
+/** POST /schools/:id/details. A refused field re-renders the page with the error by it. */
+async function detailsFromPortal(
+  p: SignedIn,
+  school: SchoolListing,
+  form: URLSearchParams,
+): Promise<Response> {
+  const here = `/schools/${school.id}`;
+  const name = form.get("name") ?? "";
+  const description = form.get("description");
+  try {
+    const saved = await updateSchoolDetails(
+      schoolsContext(p.env, p.now),
+      p.user.userId,
+      school.id,
+      description === null ? { name } : { name, description },
+    );
+    const notes: string[] = [];
+    if (saved.nameChanged) notes.push(`Renamed to ${saved.name}.`);
+    if (saved.descriptionChanged)
+      notes.push(saved.description ? "Updated the description." : "Removed the description.");
+    if (notes.length === 0) return seeOther(p, here, "Nothing to change.", "info");
+    return seeOther(p, here, notes.join(" "));
+  } catch (error) {
+    if (!(error instanceof ReefError)) throw error;
+    if (error.status === 400 && school.accepted) {
+      const m = error.message;
+      const field = m.startsWith("description")
+        ? "description"
+        : m.startsWith("name")
+          ? "name"
+          : "form";
+      return schoolPage(p, school.id, {
+        name,
+        description: description ?? school.description,
+        errors: { [field]: field === "form" ? m : `The ${m}.` },
+        status: error.status,
+      });
+    }
+    return seeOther(p, here, error.message, "error");
+  }
+}
+
+/** POST /schools/:id/send. A refused send re-renders the page with the text kept. */
+async function sendFromPortal(
+  p: SignedIn,
+  school: SchoolListing,
+  form: URLSearchParams,
+): Promise<Response> {
+  const here = `/schools/${school.id}`;
+  const text = form.get("text") ?? "";
+  // A malformed reply_to becomes NaN, which the service refuses with a clear message.
+  const replyText = (form.get("reply_to") ?? "").trim();
+  const replyTo =
+    replyText === "" ? undefined : /^\d{1,15}$/.test(replyText) ? Number(replyText) : Number.NaN;
+  try {
+    const { seq } = await sendPortalMessage(
+      schoolsContext(p.env, p.now),
+      p.user.userId,
+      school.id,
+      text,
+      replyTo,
+    );
+    return seeOther(p, `${here}#m${String(seq)}`, "Sent.");
+  } catch (error) {
+    if (!(error instanceof ReefError)) throw error;
+    if (!school.accepted) return seeOther(p, here, error.message, "error");
+    return schoolPage(p, school.id, undefined, {
+      text,
+      error: error.message,
+      status: error.status,
+      ...(replyTo !== undefined && replyTo >= 1 ? { replyTo } : {}),
+    });
+  }
 }

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { signValue } from "../src/auth/signed";
-import { FLASH_COOKIE, SESSION_COOKIE } from "../src/config";
+import { FLASH_COOKIE, SCHOOL_LIMITS, SESSION_COOKIE } from "../src/config";
 import { generateKey } from "../src/files/key";
 import { addInvite, listInvites, listUsers, removeInvite, setBanned } from "../src/files/repo";
 import { createUpload, filesContext } from "../src/files/service";
@@ -13,9 +13,11 @@ import {
   createSchool,
   inviteToSchool,
   joinSession,
+  listSchoolsFor,
   readMessages,
   schoolsContext,
   sendMessage,
+  sendPortalMessage,
 } from "../src/schools/service";
 import {
   addUser,
@@ -533,6 +535,219 @@ describe("schools", () => {
     expect(body).toContain('<li class="row link">');
     expect(body).not.toContain(">Open</a>");
     expect(await (await get("/schools", admin)).text()).toContain("With bob");
+  });
+
+  it("edits the name and description from the school page, with CSRF and inline errors", async () => {
+    const ctx = schoolsContext(workerEnv);
+    const school = await createSchool(ctx, bob.userId, "crew", "group", ["carol"]);
+    const at = `/schools/${school.school.id}`;
+    const page = await (await get(at, bob)).text();
+    expect(page).toContain(`action="${at}/details"`);
+    expect(page).toContain('name="name" value="crew"');
+    expect(page).toContain(
+      `maxlength="${SCHOOL_LIMITS.maxSchoolDescriptionLength}" aria-describedby="description-hint description-error">\n</textarea>`,
+    );
+    expect(page).not.toContain('class="school-desc"');
+    expectCleanHtml(page);
+
+    const saved = await post(`${at}/details`, bob, {
+      name: " Reef crew ",
+      description: "Ship <b>it</b>\r\nsecond line",
+    });
+    expect(saved.headers.get("Location")).toBe(at);
+    const after = await followFlash(saved, bob);
+    expect(after).toContain("Renamed to Reef crew. Updated the description.");
+    expect(after).toContain("<h1>Reef crew</h1>");
+    expect(after).toContain('<p class="school-desc">Ship &lt;b&gt;it&lt;/b&gt;\nsecond line</p>');
+    expect(after).toContain(">\nShip &lt;b&gt;it&lt;/b&gt;\nsecond line</textarea>");
+    expectCleanHtml(after);
+    const list = await (await get("/schools", bob)).text();
+    expect(list).toContain('<p class="row-desc">Ship &lt;b&gt;it&lt;/b&gt;\nsecond line</p>');
+
+    const same = await post(`${at}/details`, bob, { name: "Reef crew", description: "" });
+    expect(await followFlash(same, bob)).toContain("Removed the description.");
+    const again = await post(`${at}/details`, bob, { name: "Reef crew", description: "" });
+    expect(await followFlash(again, bob)).toContain("Nothing to change.");
+
+    expect((await post(`${at}/details`, bob, { name: "x" }, { csrf: "nope" })).status).toBe(403);
+    expect((await post(`${at}/details`, bob, { name: "x" }, { csrf: null })).status).toBe(403);
+    const invitee = await post(`${at}/details`, carol, { name: "mine now" });
+    expect(await followFlash(invitee, carol)).toContain("Accept the invite");
+
+    const long = "y".repeat(SCHOOL_LIMITS.maxSchoolNameLength + 1);
+    const tooLong = await post(`${at}/details`, bob, { name: long, description: "kept" });
+    expect(tooLong.status).toBe(400);
+    const body = await tooLong.text();
+    expect(body).toContain(
+      `The name must be 1 to ${SCHOOL_LIMITS.maxSchoolNameLength} characters.`,
+    );
+    expect(body).toContain(`value="${long}"`);
+    expect(body).toContain(">\nkept</textarea>");
+    expect(body).toContain('aria-invalid="true"');
+
+    const max = SCHOOL_LIMITS.maxSchoolDescriptionLength;
+    const wordy = await post(`${at}/details`, bob, {
+      name: "Renamed",
+      description: "d".repeat(max + 1),
+    });
+    expect(wordy.status).toBe(400);
+    const wordyBody = await wordy.text();
+    expect(wordyBody).toContain(`The description must be at most ${max} characters.`);
+    expect(wordyBody).toContain('value="Renamed"');
+    expect((await listSchoolsFor(ctx, bob.userId))[0]).toMatchObject({
+      name: "Reef crew",
+      description: "",
+    });
+  });
+
+  it("takes an optional description on the new-school form", async () => {
+    const created = await post("/schools/new", bob, {
+      name: "Helpers",
+      kind: "solo",
+      description: "  Where my agents ask for help.  ",
+    });
+    expect(created.status).toBe(303);
+    const at = created.headers.get("Location") ?? "";
+    expect(await followFlash(created, bob)).toContain(
+      '<p class="school-desc">Where my agents ask for help.</p>',
+    );
+    const form = await (await get("/schools", bob)).text();
+    expect(form).toContain('id="school-description" name="description"');
+    expect(form).toContain('<p class="row-desc">Where my agents ask for help.</p>');
+    expectCleanHtml(form);
+
+    const max = SCHOOL_LIMITS.maxSchoolDescriptionLength;
+    const refused = await post("/schools/new", bob, {
+      name: "Wordy",
+      kind: "solo",
+      description: "<i>".repeat(max),
+    });
+    expect(refused.status).toBe(400);
+    const body = await refused.text();
+    expect(body).toContain(`The description must be at most ${max} characters.`);
+    expect(body).toContain(">\n&lt;i&gt;&lt;i&gt;");
+    expect(body).toContain('value="Wordy"');
+    expect((await listSchoolsFor(schoolsContext(workerEnv), bob.userId)).map((s) => s.id)).toEqual([
+      at.split("/").pop(),
+    ]);
+  });
+
+  it("sends from the school page as a person, with CSRF, and keeps refused text", async () => {
+    const ctx = schoolsContext(workerEnv);
+    const school = await createSchool(ctx, bob.userId, "crew", "group", ["carol", "Cobular"]);
+    await acceptInvite(ctx, admin.userId, school.school.id);
+    const at = `/schools/${school.school.id}`;
+    const page = await (await get(at, bob)).text();
+    expect(page).toContain(`action="${at}/send"`);
+    expect(page).toContain('name="text"');
+    expectCleanHtml(page);
+    // Carol has not accepted: no form, and a direct post is refused.
+    expect(await (await get(at, carol)).text()).not.toContain(`action="${at}/send"`);
+    expect(await followFlash(await post(`${at}/send`, carol, { text: "hi" }), carol)).toContain(
+      "Accept the invite",
+    );
+
+    expect((await post(`${at}/send`, bob, { text: "hi" }, { csrf: "nope" })).status).toBe(403);
+    expect((await post(`${at}/send`, bob, { text: "hi" }, { csrf: null })).status).toBe(403);
+
+    const sent = await post(`${at}/send`, bob, { text: "Hello <team>\r\nsecond line" });
+    expect(sent.headers.get("Location")).toBe(`${at}#m1`);
+    const after = await followFlash(sent, bob);
+    expect(after).toContain("Sent.");
+    expect(after).toContain('<li class="msg person" id="m1">');
+    expect(after).toContain("In the portal");
+    expect(after).toContain("Hello &lt;team&gt;\nsecond line");
+    expect(after).not.toContain("reef-portal");
+    // Bob's own portal message is not "new" for him; Cobular sees it from another account.
+    expect(after).not.toContain('class="divider"');
+    const theirs = await (await get(at, admin)).text();
+    expect(theirs).toContain('<li class="msg other person" id="m1">');
+    expect(theirs).toContain('class="divider"');
+
+    const long = "é".repeat(SCHOOL_LIMITS.maxMessageBytes / 2 + 1);
+    const refused = await post(`${at}/send`, bob, { text: long });
+    expect(refused.status).toBe(413);
+    const body = await refused.text();
+    expect(body).toContain("Message too long");
+    expect(body).toContain(`${long}</textarea>`);
+    expect(body).toContain('aria-invalid="true"');
+
+    await post(`${at}/pause`, bob);
+    const paused = await (await get(at, bob)).text();
+    expect(paused).not.toContain(`action="${at}/send"`);
+    expect(paused).toContain("Sending is off while the school is paused.");
+    const blocked = await post(`${at}/send`, bob, { text: "still there?" });
+    expect(blocked.status).toBe(409);
+    expect(await blocked.text()).toContain("is paused");
+  });
+
+  it("replies from the portal via ?reply=, with CSRF, and links each reply to its parent", async () => {
+    const ctx = schoolsContext(workerEnv);
+    const school = await createSchool(ctx, bob.userId, "crew", "group", ["Cobular"]);
+    const id = school.school.id;
+    await acceptInvite(ctx, admin.userId, id);
+    const at = `/schools/${id}`;
+    const agent = (await joinSession(ctx, admin.userId, "persistent_agent", "iris", "codex"))
+      .handle;
+    await sendMessage(ctx, admin.userId, agent, id, "Question?");
+
+    const page = await (await get(at, bob)).text();
+    expect(page).toContain(`<a class="reply-link" href="${at}?reply=1#compose">Reply`);
+    expect(page).toContain('<form class="compose" id="compose"');
+    expect(page).not.toContain("Replying to");
+
+    const replying = await (await get(`${at}?reply=1`, bob)).text();
+    expect(replying).toContain(
+      'Replying to <a href="#m1">#1</a> · <span class="mono">Cobular</span>',
+    );
+    expect(replying).toContain(`<a href="${at}#compose">Cancel`);
+    expect(replying).toContain('<input type="hidden" name="reply_to" value="1">');
+    expectCleanHtml(replying);
+
+    const fields = { text: "Answer", reply_to: "1" };
+    expect((await post(`${at}/send`, bob, fields, { csrf: "nope" })).status).toBe(403);
+    expect((await post(`${at}/send`, bob, fields, { csrf: null })).status).toBe(403);
+    const sent = await post(`${at}/send`, bob, fields);
+    expect(sent.headers.get("Location")).toBe(`${at}#m2`);
+    const after = await followFlash(sent, bob);
+    expect(after).toMatch(
+      /<li class="msg person" id="m2">[\s\S]*<p class="msg-reply"><a href="#m1">[\s\S]*#1 · <span class="mono">Cobular<\/span><\/a><\/p><p class="msg-text">Answer<\/p>/,
+    );
+    expect(after).not.toContain("Replying to");
+
+    const missing = await post(`${at}/send`, bob, { text: "Kept", reply_to: "99" });
+    expect(missing.status).toBe(400);
+    const missingBody = await missing.text();
+    expect(missingBody).toContain(`No message with seq 99 in school &quot;crew&quot; (${id})`);
+    expect(missingBody).toContain(">\nKept</textarea>");
+    expect(missingBody).toContain("Message #99 is no longer in this school");
+    expect(missingBody).not.toContain('name="reply_to"');
+    const malformed = await post(`${at}/send`, bob, { text: "Kept", reply_to: "1; drop" });
+    expect(malformed.status).toBe(400);
+
+    // Fill past one page: the reply's parent (seq 1) is now on an earlier page.
+    await env.DB.prepare(
+      `WITH RECURSIVE n(seq) AS (SELECT 3 UNION ALL SELECT seq + 1 FROM n WHERE seq < 60)
+       INSERT INTO messages (school_id, seq, sender_id, session_type, product, label, text,
+         created_at)
+       SELECT ?1, seq, ?2, 'persistent_agent', 'codex', 'iris', 'filler', ?3 FROM n`,
+    )
+      .bind(id, admin.userId, Date.now())
+      .run();
+    await sendPortalMessage(ctx, bob.userId, id, "Late answer", 1);
+    const latest = await (await get(`${at}?reply=1`, bob)).text();
+    expect(latest).toContain(`<p class="msg-reply"><a href="${at}?before=2#m1">`);
+    expect(latest).toContain(`Replying to <a href="${at}?before=2#m1">#1</a>`);
+    expect(await (await get(`${at}?before=2`, bob)).text()).toContain('id="m1"');
+
+    // Retention removed the parent: the reply says so, and new replies to it are refused.
+    await env.DB.prepare("DELETE FROM messages WHERE school_id = ? AND seq = 1").bind(id).run();
+    const gone = await (await get(`${at}?before=3`, bob)).text();
+    expect(gone).toContain("#1 · no longer available</p>");
+    expect((await post(`${at}/send`, bob, fields)).status).toBe(400);
+
+    await post(`${at}/pause`, bob);
+    expect(await (await get(at, bob)).text()).not.toContain('class="reply-link"');
   });
 
   it("only invites into a group with room, from the page", async () => {
