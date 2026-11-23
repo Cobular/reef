@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "b35fb7b73a";
+export const ASSET_VERSION = "4ba830e362";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -35,9 +35,6 @@ form{margin:0}
 [tabindex="-1"]:focus{outline:none}
 .foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 20px;padding-bottom:32px;color:var(--muted);font-size:13px}
 .foot a{color:var(--muted)}.foot a:hover{color:var(--ink)}
-.foot-mcp{display:inline-flex;align-items:center;gap:6px;min-width:0}
-.foot code{overflow-wrap:anywhere;user-select:all;-webkit-user-select:all}
-.foot .btn.small{padding:2px 8px}
 .avatar{position:relative;display:inline-grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;background:var(--line);color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;overflow:hidden;vertical-align:middle}
 .avatar img{position:absolute;inset:0;width:100%;height:100%}
 .avatar.sm{width:22px;height:22px;font-size:10px}
