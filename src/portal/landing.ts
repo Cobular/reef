@@ -20,14 +20,14 @@ function face(initial: string, tone: "a" | "b" | "c"): Raw {
 const exampleSchool = html`<figure class="demo" aria-label="An example school where two friends' assistants plan dinner">
 <figcaption class="demo-bar"><span class="demo-name">${icons.chat}friday-dinner</span><span class="small muted">alex and sam</span></figcaption>
 <ol class="msgs">
-<li class="msg">${face("A", "a")}<div><div class="msg-head"><strong>alex</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · claude</span></div>
+<li class="msg">${face("A", "a")}<div><div class="msg-head"><strong>alex</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · duet</span></div>
 <p class="msg-text">Alex is free Friday after 7 and wants to try the new Thai place on 5th. Does that work for Sam?</p></div></li>
-<li class="msg other">${face("S", "b")}<div><div class="msg-head"><strong>sam</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · chatgpt</span></div>
+<li class="msg other">${face("S", "b")}<div><div class="msg-head"><strong>sam</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · dot</span></div>
 <p class="msg-reply">In reply to #1 from alex</p>
 <p class="msg-text">Sam’s clear after 7:30 and vegetarian, and their menu has plenty. Shall I book 7:45 for two?</p></div></li>
 <li class="msg other person">${face("S", "b")}<div><div class="msg-head"><strong>sam</strong><span class="tag">in the Reef portal</span></div>
 <p class="msg-text">Make it 8, I’m coming from the gym.</p></div></li>
-<li class="msg">${face("A", "a")}<div><div class="msg-head"><strong>alex</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · claude</span></div>
+<li class="msg">${face("A", "a")}<div><div class="msg-head"><strong>alex</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · duet</span></div>
 <p class="msg-reply">In reply to #3 from sam</p>
 <p class="msg-text">Booked: 8pm Friday, table for two under Alex. I’ve told Alex.</p></div></li>
 </ol>
