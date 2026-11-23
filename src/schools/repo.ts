@@ -276,7 +276,8 @@ export interface MemberRow {
 /**
  * The account's schools and invites, and every member of them, in one round trip. `read_seq` is
  * the furthest position any of the account's sessions has read to; `unread` counts messages
- * after it.
+ * after it. CROSS JOIN makes that lookup walk the account's sessions (one primary-key seek
+ * each) rather than every read position in the school.
  */
 export async function listMemberships(
   db: D1Database,
@@ -292,9 +293,10 @@ export async function listMemberships(
              (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
                AS last_message_at,
              CASE WHEN sm.accepted = 1 THEN COALESCE(
-               (SELECT MAX(rp.last_seq) FROM read_positions rp
-                JOIN sessions s ON s.handle = rp.session_handle
-                WHERE rp.school_id = sc.id AND s.user_id = ?1), 0)
+               (SELECT MAX(rp.last_seq) FROM sessions s
+                CROSS JOIN read_positions rp
+                  ON rp.session_handle = s.handle AND rp.school_id = sc.id
+                WHERE s.user_id = ?1), 0)
              ELSE 0 END AS read_seq
            FROM school_members sm
            JOIN schools sc ON sc.id = sm.school_id
@@ -352,9 +354,15 @@ export interface RoutedSchoolRow {
 }
 
 /**
- * Creates the session or refreshes its last_seen_at; the handle stays the one first issued for
- * this (account, type, product, label). Also returns the accepted schools routed to the type
- * and the number of pending invites, in the same round trip.
+ * last_seen_at only drives session retention (31 days), so it is refreshed at most once a day:
+ * polling does not write on every call.
+ */
+const SESSION_TOUCH_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Creates the session or refreshes its last_seen_at (at most once a day, like touchSession); the
+ * handle stays the one first issued for this (account, type, product, label). Also returns the
+ * accepted schools routed to the type and the number of pending invites, in the same round trip.
  */
 export async function joinSession(
   db: D1Database,
@@ -365,15 +373,23 @@ export async function joinSession(
   label: string,
   now: number,
 ): Promise<{ session: SessionRow; schools: RoutedSchoolRow[]; pendingInvites: number }> {
-  const [session, schools, pending] = await db.batch<SessionRow | RoutedSchoolRow | { n: number }>([
+  const [, session, schools, pending] = await db.batch<
+    SessionRow | RoutedSchoolRow | { n: number }
+  >([
+    // An upsert whose DO UPDATE is skipped returns no RETURNING row, so the row is read next.
     db
       .prepare(
         `INSERT INTO sessions (handle, user_id, type, product, label, created_at, last_seen_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
          ON CONFLICT (user_id, type, product, label) DO UPDATE SET last_seen_at = excluded.last_seen_at
-         RETURNING *`,
+         WHERE last_seen_at < excluded.last_seen_at - ${SESSION_TOUCH_MS}`,
       )
       .bind(candidateHandle, userId, type, product, label, now),
+    db
+      .prepare(
+        "SELECT * FROM sessions WHERE user_id = ? AND type = ? AND product = ? AND label = ?",
+      )
+      .bind(userId, type, product, label),
     db
       .prepare(
         `SELECT sc.id, sc.name, sc.description, sc.kind, sc.paused FROM school_members sm
@@ -395,12 +411,11 @@ export async function joinSession(
   };
 }
 
-/** Refreshes last_seen_at at most once an hour, so polling does not write on every call. */
 function touchSession(db: D1Database, handle: string, userId: number, now: number) {
   return db
     .prepare(
       `UPDATE sessions SET last_seen_at = ?1
-       WHERE handle = ?2 AND user_id = ?3 AND last_seen_at < ?1 - 3600000`,
+       WHERE handle = ?2 AND user_id = ?3 AND last_seen_at < ?1 - ${SESSION_TOUCH_MS}`,
     )
     .bind(now, handle, userId);
 }
@@ -580,8 +595,8 @@ export interface NewMessage {
  * Inserts a message and returns its seq, or null if a guard failed: the school is paused, the
  * sender's member row is not accepted or (for a session) does not include the session type, the
  * sender hit the rate limit, or the replied-to message is no longer in the school. A person's portal message skips the session-type check. The
- * seq is allocated inside this single INSERT ... SELECT: one above the
- * highest of the newest seq and any read position (so a school emptied by retention never reuses
+ * seq is allocated inside this single INSERT ... SELECT: one above the larger of the newest seq
+ * and the school's seq_floor (raised by the retention cron, so a school it empties never reuses
  * seqs that sessions have already read past),
  * which D1 runs atomically, so concurrent sends get unique, dense numbers.
  */
@@ -595,9 +610,9 @@ export async function insertMessage(
     .prepare(
       `INSERT INTO messages (school_id, seq, sender_id, session_type, product, label, text,
          attachments, created_at, reply_to)
-       SELECT ?1, MAX(COALESCE((SELECT MAX(seq) FROM messages WHERE school_id = ?1), 0),
-         COALESCE((SELECT last_seq FROM read_positions WHERE school_id = ?1
-           ORDER BY last_seq DESC LIMIT 1), 0)) + 1,
+       SELECT ?1, MAX(COALESCE((SELECT seq FROM messages WHERE school_id = ?1
+           ORDER BY seq DESC LIMIT 1), 0),
+         (SELECT seq_floor FROM schools WHERE id = ?1)) + 1,
          ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?11
        WHERE EXISTS (SELECT 1 FROM schools WHERE id = ?1 AND paused = 0)
          AND EXISTS (SELECT 1 FROM school_members sm WHERE sm.school_id = ?1 AND sm.user_id = ?2

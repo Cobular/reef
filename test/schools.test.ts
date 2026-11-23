@@ -829,6 +829,46 @@ describe("school cleanup", () => {
     expect(page.messages.map((m) => m.text)).toEqual(["back"]);
   });
 
+  it("keeps numbering above deleted messages once their read positions are gone too", async () => {
+    const id = await group(bob);
+    const ha = await join(alice);
+    const now = Date.now();
+    const old = now - SCHOOL_LIMITS.messageRetentionMs - 1000;
+    for (const text of ["o1", "o2", "o3"]) await sendMessage(ctx(old), alice.userId, ha, id, text);
+    await env.DB.prepare("DELETE FROM read_positions").run();
+    expect((await cleanupSchools(env.DB, now)).messages).toBe(3);
+    const floor = await env.DB.prepare("SELECT seq_floor FROM schools WHERE id = ?")
+      .bind(id)
+      .first<number>("seq_floor");
+    expect(floor).toBe(3);
+    expect((await sendMessage(ctx(now), alice.userId, ha, id, "back")).seq).toBe(4);
+  });
+
+  it("deletes only the oldest messages, up to the first one inside retention", async () => {
+    const id = await group(bob);
+    const ha = await join(alice);
+    const now = Date.now();
+    const old = now - SCHOOL_LIMITS.messageRetentionMs - 1000;
+    await sendMessage(ctx(old), alice.userId, ha, id, "o1");
+    await sendMessage(ctx(old), alice.userId, ha, id, "o2");
+    await sendMessage(ctx(now), alice.userId, ha, id, "n3");
+    // Out of order: older than n3, so it waits until n3 itself expires.
+    await sendMessage(ctx(old), alice.userId, ha, id, "o4");
+    expect((await cleanupSchools(env.DB, now)).messages).toBe(2);
+    const page = await transcript(ctx(), alice.userId, id);
+    expect(page.messages.map((m) => m.text)).toEqual(["o4", "n3"]);
+    const floor = await env.DB.prepare("SELECT seq_floor FROM schools WHERE id = ?")
+      .bind(id)
+      .first<number>("seq_floor");
+    expect(floor).toBe(2);
+    expect((await sendMessage(ctx(now), alice.userId, ha, id, "n5")).seq).toBe(5);
+    // The five-minute cron runs skip message retention.
+    const other = (await createSchool(ctx(), alice.userId, "other", "group")).school.id;
+    await sendMessage(ctx(old), alice.userId, ha, other, "o1");
+    expect((await cleanupSchools(env.DB, now, { messages: false })).messages).toBe(0);
+    expect((await cleanupSchools(env.DB, now)).messages).toBe(1);
+  });
+
   it("removes attachment keys once the file has expired or been deleted", async () => {
     const id = await group(bob);
     const h = await join(alice);
@@ -858,18 +898,13 @@ describe("school cleanup", () => {
     expect(stored?.attachments).not.toContain('"key"');
   });
 
-  it("deletes sessions not seen for 90 days, with their read positions", async () => {
+  it("deletes sessions not seen for 31 days, with their read positions", async () => {
     const id = await group(bob);
     const now = Date.now();
-    const stale = (
-      await joinSession(
-        ctx(now - SCHOOL_LIMITS.sessionRetentionMs - 1000),
-        alice.userId,
-        "chat",
-        "old",
-        "p",
-      )
-    ).handle;
+    const day = 24 * 60 * 60 * 1000;
+    const stale = (await joinSession(ctx(now - 31 * day - 1000), alice.userId, "chat", "old", "p"))
+      .handle;
+    const kept = (await joinSession(ctx(now - 30 * day), alice.userId, "chat", "kept", "p")).handle;
     const fresh = await join(alice);
     const hb = await join(bob);
     await sendMessage(ctx(), bob.userId, hb, id, "hi");
@@ -886,7 +921,30 @@ describe("school cleanup", () => {
       .bind(stale)
       .first<{ sessions: number; positions: number }>();
     expect(rows).toEqual({ sessions: 0, positions: 0 });
+    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions WHERE handle = ?")
+      .bind(kept)
+      .first<number>("n");
+    expect(left).toBe(1);
     expect((await checkUnread(ctx(), alice.userId, fresh)).any).toBe(true);
+  });
+
+  it("refreshes a session's last seen time at most once a day", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const start = Date.now() - 3 * day;
+    const lastSeen = (handle: string) =>
+      env.DB.prepare("SELECT last_seen_at FROM sessions WHERE handle = ?")
+        .bind(handle)
+        .first<number>("last_seen_at");
+    const h = (await joinSession(ctx(start), alice.userId, "chat", "x", "p")).handle;
+    expect(
+      (await joinSession(ctx(start + day - 1000), alice.userId, "chat", "x", "p")).handle,
+    ).toBe(h);
+    await checkUnread(ctx(start + day - 1000), alice.userId, h);
+    expect(await lastSeen(h)).toBe(start);
+    await joinSession(ctx(start + day + 1000), alice.userId, "chat", "x", "p");
+    expect(await lastSeen(h)).toBe(start + day + 1000);
+    await checkUnread(ctx(start + 2 * day + 2000), alice.userId, h);
+    expect(await lastSeen(h)).toBe(start + 2 * day + 2000);
   });
 });
 

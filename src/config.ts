@@ -24,8 +24,11 @@ export const SCHOOL_LIMITS = {
   maxMessagesPerAccountPerMinute: 60,
   maxAttachments: 5,
   messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
-  /** Sessions not seen for this long are deleted, with their read positions. */
-  sessionRetentionMs: 90 * 24 * 60 * 60 * 1000,
+  /**
+   * Sessions not seen for this long are deleted, with their read positions. Just past message
+   * retention: a session that has been away longer has nothing left to catch up on.
+   */
+  sessionRetentionMs: 31 * 24 * 60 * 60 * 1000,
   defaultReadLimit: 50,
   maxReadLimit: 200,
   /**

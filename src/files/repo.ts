@@ -308,23 +308,53 @@ export async function setBanned(
 // ---- quotas --------------------------------------------------------------------------------
 
 /**
- * Bytes held by files that are not deleted (pending uploads count at their declared size).
- * `state IN ('pending', 'ready')` is the same set as `state != 'deleted'` (a CHECK constraint
- * allows only these three), but lets the service-wide sum use the files_state_* indexes instead
- * of scanning every row, deleted ones included.
+ * Bytes held by an account's files that are not deleted (pending uploads count at their
+ * declared size).
  */
-export async function residentBytes(db: D1Database, ownerId?: number): Promise<number> {
-  const stmt =
-    ownerId === undefined
-      ? db.prepare(
-          "SELECT COALESCE(SUM(size), 0) AS n FROM files WHERE state IN ('pending', 'ready')",
-        )
-      : db
-          .prepare(
-            "SELECT COALESCE(SUM(size), 0) AS n FROM files WHERE state != 'deleted' AND owner_id = ?",
-          )
-          .bind(ownerId);
-  return (await stmt.first<{ n: number }>())?.n ?? 0;
+export async function residentBytes(db: D1Database, ownerId: number): Promise<number> {
+  const row = await db
+    .prepare(
+      "SELECT COALESCE(SUM(size), 0) AS n FROM files WHERE state != 'deleted' AND owner_id = ?",
+    )
+    .bind(ownerId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/**
+ * Bytes held by all files that are not deleted, without summing every file: service_stats as the
+ * cron job last left it (refreshServiceStats), plus every file inserted since (rowid above the
+ * cached maximum, a primary-key range). Never an under-count: rows are deleted only by the purge,
+ * in the same batch as the refresh, so new rows get rowids above the cached maximum; a file
+ * deleted since the refresh still counts until the next run.
+ */
+export async function serviceResidentBytes(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(s.resident_bytes, 0) + COALESCE((SELECT SUM(size) FROM files
+         WHERE rowid > COALESCE(s.max_file_rowid, 0) AND state != 'deleted'), 0) AS n
+       FROM (SELECT 1) LEFT JOIN service_stats s ON s.id = 1`,
+    )
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/**
+ * Recomputes service_stats; written only when a value changed. `state IN ('pending', 'ready')`
+ * is the same set as `state != 'deleted'` (a CHECK constraint allows only these three), but uses
+ * the files_state_expires index instead of scanning every row, deleted ones included.
+ */
+export function refreshServiceStats(db: D1Database): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO service_stats (id, resident_bytes, max_file_rowid)
+     SELECT 1,
+       (SELECT COALESCE(SUM(size), 0) FROM files WHERE state IN ('pending', 'ready')),
+       (SELECT COALESCE(MAX(rowid), 0) FROM files)
+     WHERE true
+     ON CONFLICT (id) DO UPDATE SET
+       resident_bytes = excluded.resident_bytes, max_file_rowid = excluded.max_file_rowid
+     WHERE resident_bytes != excluded.resident_bytes OR max_file_rowid != excluded.max_file_rowid`,
+  );
 }
 
 export async function uploadsSince(db: D1Database, ownerId: number, since: number) {

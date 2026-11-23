@@ -183,6 +183,7 @@ export async function resetDb(): Promise<void> {
       "DELETE FROM files",
       "DELETE FROM invites",
       "DELETE FROM users",
+      "DELETE FROM service_stats",
     ].map((sql) => env.DB.prepare(sql)),
   );
 }

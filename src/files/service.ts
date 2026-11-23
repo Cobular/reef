@@ -23,6 +23,7 @@ import {
   markDeleted,
   deleteParts as removeParts,
   residentBytes,
+  serviceResidentBytes,
   setShares,
   shareLogins,
   shareUserIds,
@@ -143,7 +144,7 @@ export async function createUpload(
       413,
       "Account storage full: your files would exceed 10 GiB. Delete a file or wait for one to expire.",
     );
-  if ((await residentBytes(db)) + input.size > LIMITS.maxResidentBytesService)
+  if ((await serviceResidentBytes(db)) + input.size > LIMITS.maxResidentBytesService)
     throw new ReefError(413, "Reef is full right now. Try again in a few minutes.");
 
   const id = randomId();
