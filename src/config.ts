@@ -48,6 +48,15 @@ export const SCHOOL_LIMITS = {
 export const RATE_LIMITS = {
   /** Every request, per IP (CF-Connecting-IP). Hosted MCP clients share their vendor's IPs. */
   ip: { binding: "RL_IP", limit: 300, period: 60 },
+  /**
+   * Requests carrying a bearer token, per IP. Hosted MCP clients (claude.ai, ChatGPT) share their
+   * vendor's IPs across all users, so this is a flood guard only; the per-account `mcp` limit
+   * applies once the token is validated. OAuth tokens need a KV read to validate, so they cannot
+   * be keyed by account before that.
+   */
+  bearer: { binding: "RL_BEARER", limit: 3000, period: 60 },
+  /** Every portal request with a valid session cookie, per account instead of per IP. */
+  account: { binding: "RL_ACCOUNT", limit: 300, period: 60 },
   /** Sign-in and OAuth endpoints, per IP. */
   auth: { binding: "RL_AUTH", limit: 30, period: 60 },
   /** MCP requests, per account: several sessions polling school_unread every few seconds fit. */

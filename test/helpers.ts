@@ -112,7 +112,14 @@ export interface TestEnvOptions {
   limiters?: Partial<Record<RateLimitBinding, RateLimit>>;
 }
 
-export type RateLimitBinding = "RL_IP" | "RL_AUTH" | "RL_MCP" | "RL_WRITE" | "RL_DATA";
+export type RateLimitBinding =
+  | "RL_IP"
+  | "RL_BEARER"
+  | "RL_ACCOUNT"
+  | "RL_AUTH"
+  | "RL_MCP"
+  | "RL_WRITE"
+  | "RL_DATA";
 
 /** A rate limiter stub that records each key and refuses those `deny` picks (default all). */
 export function stubLimiter(deny: (key: string) => boolean = () => true) {
@@ -135,6 +142,8 @@ export function testEnv(options: TestEnvOptions = {}): Env {
     SIGNUP_MODE: options.signupMode ?? "invite",
     // The real local limiters would count across tests; stubs keep tests independent.
     RL_IP: allow,
+    RL_BEARER: allow,
+    RL_ACCOUNT: allow,
     RL_AUTH: allow,
     RL_MCP: allow,
     RL_WRITE: allow,
