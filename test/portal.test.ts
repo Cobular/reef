@@ -173,6 +173,7 @@ describe("pages and headers", () => {
       [`/schools/${school.school.id}`, admin, "invited you to this school."],
       [`/schools/${school.school.id}`, bob, "dm"],
       ["/admin", admin, "Accounts"],
+      ["/account", bob, "Delete your account"],
     ];
     for (const [path, who, expected] of pages) {
       const res = await get(path, who);
@@ -220,8 +221,18 @@ describe("pages and headers", () => {
 
   it("has a quiet footer, and a folded connect panel with the MCP URL on files and schools", async () => {
     const body = await (await get("/files", bob)).text();
-    expect(body).toContain('href="https://github.com/Cobular/reef"');
-    expect(body).toContain('href="https://github.com/Cobular/reef/security/policy"');
+    const footer = body.match(/<footer[^>]*>([\s\S]*?)<\/footer>/)?.[1] ?? "";
+    expect(
+      [...footer.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[2], m[1]]),
+    ).toEqual([
+      ["Source", "https://github.com/Cobular/reef"],
+      ["Security", "https://github.com/Cobular/reef/security/policy"],
+      ["Privacy", "https://cobular.notion.site/Privacy-Policy-277b8e3e484e445193f01fb142529a69"],
+      ["Terms", "/terms"],
+      ["Report abuse", "https://github.com/Cobular/reef/issues/new?template=abuse-report.yml"],
+    ]);
+    expect(await (await get("/")).text()).toContain(`<a href="/terms">Terms</a>`);
+    expect(body).toContain('<a class="me-link" href="/account"');
     expect(body).not.toContain("foot-mcp");
     expect(body).toContain(`<code id="connect-mcp">${ORIGIN}/mcp</code>`);
     const schools = await (await get("/schools", bob)).text();
@@ -839,6 +850,73 @@ describe("admin", () => {
     expect((await listUsers(env.DB)).map((u) => u.login)).toEqual(
       expect.arrayContaining(["Cobular", "bob", "carol"]),
     );
+  });
+});
+
+describe("account", () => {
+  async function exists(userId: number) {
+    return (await listUsers(env.DB)).some((u) => u.id === userId);
+  }
+
+  it("deletes the account only with the form token and the login typed out", async () => {
+    await readyFile(bob, ["carol"]);
+    const page = await (await get("/account", bob)).text();
+    expect(page).toContain('aria-current="page"');
+    expect(page).toContain('action="/account/delete"');
+    expect(page).toContain("It can’t be undone.");
+
+    expect((await post("/account/delete", bob, { confirm: "bob" }, { csrf: null })).status).toBe(
+      403,
+    );
+    expect(
+      (await post("/account/delete", bob, { confirm: "bob" }, { origin: "https://evil.example" }))
+        .status,
+    ).toBe(403);
+    const empty = await post("/account/delete", bob, { confirm: " " });
+    expect(empty.status).toBe(400);
+    expect(await empty.text()).toContain("Type your GitHub login to confirm.");
+    const wrong = await post("/account/delete", bob, { confirm: "carol" });
+    expect(wrong.status).toBe(400);
+    const wrongBody = await wrong.text();
+    expect(wrongBody).toContain("That isn’t your GitHub login.");
+    expect(wrongBody).toContain('aria-invalid="true"');
+    expectCleanHtml(wrongBody);
+    expect(await exists(bob.userId)).toBe(true);
+
+    const done = await post("/account/delete", bob, { confirm: " BOB " });
+    expect(done.status).toBe(200);
+    expect(done.headers.getSetCookie().join()).toMatch(
+      new RegExp(`${SESSION_COOKIE}=;.*Max-Age=0`, "i"),
+    );
+    const body = await done.text();
+    expect(body).toContain("Your account is deleted");
+    expect(body).toContain("with its 1 file and 0 messages");
+    expect(body).toContain("Sign in");
+    expectCleanHtml(body);
+    expect(await exists(bob.userId)).toBe(false);
+    // The old session cookie no longer signs anyone in.
+    expect((await get("/files", bob)).status).toBe(303);
+  });
+
+  it("is signed-in only", async () => {
+    expect((await get("/account")).headers.get("Location")).toBe("/login?next=%2Faccount");
+    expect((await get("/account/delete", bob)).status).toBe(404);
+  });
+});
+
+describe("terms", () => {
+  it("is public, under the strict CSP, with a last-updated date", async () => {
+    const res = await get("/terms");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
+    const body = await res.text();
+    expect(body).toContain("Terms of use");
+    expect(body).toContain("2026-11-23");
+    expect(body).toContain('href="/account"');
+    expect(body).toContain("https://github.com/Cobular/reef/issues/new?template=abuse-report.yml");
+    expectCleanHtml(body);
+    expect((await get("/terms", bob)).status).toBe(200);
+    expect((await post("/terms", bob)).status).toBe(404);
   });
 });
 

@@ -222,7 +222,12 @@ export async function createSchoolFromPortal(p: SignedIn): Promise<Response> {
     const m = error.message;
     if (m.startsWith("name")) return fail({ name: `The ${m}.` }, error.status);
     if (m.startsWith("description")) return fail({ description: `The ${m}.` }, error.status);
-    if (m.startsWith("Not Reef accounts") || m.includes("members") || m.includes("other account"))
+    if (
+      error.status === 429 ||
+      m.startsWith("Not Reef accounts") ||
+      m.includes("members") ||
+      m.includes("other account")
+    )
       return fail({ logins: m }, error.status);
     return fail({ form: m }, error.status);
   }

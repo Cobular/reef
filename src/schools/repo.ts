@@ -178,6 +178,38 @@ export async function memberIds(db: D1Database, schoolId: string): Promise<numbe
   return result.results.map((r) => r.user_id);
 }
 
+/**
+ * Adds `count` to the account's school invitations sent on `day`, unless that would take it past
+ * `limit`; one primary-key upsert, so two requests at once can't both pass. Returns false (and
+ * writes nothing) when the invitations don't fit.
+ */
+export async function reserveInvites(
+  db: D1Database,
+  userId: number,
+  day: number,
+  count: number,
+  limit: number,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `INSERT INTO school_invites_sent (day, user_id, sent) SELECT ?1, ?2, ?3 WHERE ?3 <= ?4
+       ON CONFLICT (day, user_id) DO UPDATE SET sent = sent + excluded.sent
+         WHERE sent + excluded.sent <= ?4
+       RETURNING sent`,
+    )
+    .bind(day, userId, count, limit)
+    .first();
+  return row !== null;
+}
+
+export async function invitesSent(db: D1Database, userId: number, day: number): Promise<number> {
+  const row = await db
+    .prepare("SELECT sent FROM school_invites_sent WHERE day = ? AND user_id = ?")
+    .bind(day, userId)
+    .first<{ sent: number }>();
+  return row?.sent ?? 0;
+}
+
 export async function addPendingMembers(db: D1Database, schoolId: string, userIds: number[]) {
   if (userIds.length === 0) return;
   await db.batch(
@@ -207,7 +239,17 @@ export async function removeMember(
   schoolId: string,
   userId: number,
 ): Promise<boolean> {
-  const [, , dropped] = await db.batch([
+  const [, , dropped] = await db.batch(removeMemberStatements(db, schoolId, userId));
+  return (dropped?.results.length ?? 0) > 0;
+}
+
+/** removeMember's three statements, for a caller's own batch; the last returns the dropped id. */
+export function removeMemberStatements(
+  db: D1Database,
+  schoolId: string,
+  userId: number,
+): D1PreparedStatement[] {
+  return [
     db
       .prepare(
         `DELETE FROM read_positions WHERE school_id = ?1
@@ -224,8 +266,7 @@ export async function removeMember(
          RETURNING id`,
       )
       .bind(schoolId),
-  ]);
-  return (dropped?.results.length ?? 0) > 0;
+  ];
 }
 
 export async function updateSessionTypes(

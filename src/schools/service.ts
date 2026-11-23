@@ -1,4 +1,4 @@
-import { SCHOOL_LIMITS, SESSION_TYPES, type SessionType } from "../config";
+import { DAY_MS, SCHOOL_LIMITS, SESSION_TYPES, type SessionType, utcDay } from "../config";
 import { isValidKey } from "../files/key";
 import { findUsersByLogins, type UserRow } from "../files/repo";
 import { ReefError, uniqueLogins } from "../files/service";
@@ -126,6 +126,23 @@ function capacity(kind: SchoolKind): number {
   return kind === "pair" ? 2 : SCHOOL_LIMITS.maxGroupMembers;
 }
 
+/**
+ * Counts `count` new invitations against the actor's daily limit, or refuses. Runs before the
+ * member rows are written; if that write then fails, the count stays, erring toward fewer.
+ */
+async function reserveInvites(ctx: SchoolsContext, actor: number, count: number): Promise<void> {
+  if (count === 0) return;
+  const limit = SCHOOL_LIMITS.maxInvitesPerAccountPerDay;
+  const day = utcDay(ctx.now);
+  if (await repo.reserveInvites(ctx.db, actor, day, count, limit)) return;
+  const left = Math.max(0, limit - (await repo.invitesSent(ctx.db, actor, day)));
+  throw new ReefError(
+    429,
+    `You can send ${limit} school invitations a day and have ${left} left today, so ${count === 1 ? "this one wasn’t" : `these ${count} weren’t`} sent. The count resets at 00:00 UTC.`,
+    Math.ceil(((day + 1) * DAY_MS - ctx.now) / 1000),
+  );
+}
+
 export interface CreatedSchool {
   school: SchoolRow;
   invited: string[];
@@ -161,6 +178,7 @@ export async function createSchool(
     created_by: actor,
     created_at: ctx.now,
   };
+  await reserveInvites(ctx, actor, invitees.length);
   await repo.insertSchool(ctx.db, school, [
     { userId: actor, accepted: true },
     ...invitees.map((u) => ({ userId: u.id, accepted: false })),
@@ -187,6 +205,7 @@ export async function inviteToSchool(
         ? "A pair school has exactly two members."
         : `A group school has at most ${capacity(school.kind)} members.`,
     );
+  await reserveInvites(ctx, actor, fresh.length);
   await repo.addPendingMembers(
     ctx.db,
     school.id,

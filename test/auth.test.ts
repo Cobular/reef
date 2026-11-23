@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { pkceChallenge } from "../src/auth/github";
+import { MAX_NEW_ACCOUNTS_PER_DAY } from "../src/config";
 import { csrfToken } from "../src/portal/csrf";
 import {
   addUser,
@@ -371,5 +372,90 @@ describe("admission", () => {
     await addUser(102, "bob", true);
     const { back } = await signInMcp("bob");
     expect(back.status).toBe(403);
+  });
+});
+
+// ---- open signups ----------------------------------------------------------------------------
+
+const DAY = 86_400_000;
+
+/** `count` accounts created at `at`, with IDs from `from`. */
+async function seedAccounts(count: number, at: number, from = 1000) {
+  await env.DB.batch(
+    Array.from({ length: count }, (_, i) =>
+      env.DB.prepare("INSERT INTO users (id, login, created_at) VALUES (?, ?, ?)").bind(
+        from + i,
+        `seed${from + i}`,
+        at,
+      ),
+    ),
+  );
+}
+
+describe("daily cap on new accounts", () => {
+  const open = testEnv({ signupMode: "open" });
+
+  it("refuses a new uninvited account once today's places are taken, saying when to retry", async () => {
+    await seedAccounts(MAX_NEW_ACCOUNTS_PER_DAY, Date.now());
+    const { back } = await portalLogin("mallory", open);
+    expect(back.status).toBe(503);
+    const retry = Number(back.headers.get("Retry-After"));
+    expect(retry).toBeGreaterThan(0);
+    expect(retry).toBeLessThanOrEqual(DAY / 1000);
+    const tomorrow = new Date(Date.now() - (Date.now() % DAY) + DAY).toISOString().slice(0, 10);
+    const body = await back.text();
+    expect(body).toContain("as many new accounts as it can today");
+    expect(body).toContain(`00:00 UTC on ${tomorrow}`);
+    expect(body).toMatch(/invite/);
+    expect(back.headers.getSetCookie().join()).not.toContain("__Host-reef-session=");
+    expect(await env.DB.prepare("SELECT id FROM users WHERE id = 666").first()).toBeNull();
+  });
+
+  it("admits the last place, counting only accounts created since 00:00 UTC", async () => {
+    const dayStart = Date.now() - (Date.now() % DAY);
+    await seedAccounts(MAX_NEW_ACCOUNTS_PER_DAY, dayStart - 1);
+    await seedAccounts(MAX_NEW_ACCOUNTS_PER_DAY - 1, dayStart, 2000);
+    const { back } = await portalLogin("mallory", open);
+    expect(back.status).toBe(302);
+    expect(await env.DB.prepare("SELECT id FROM users WHERE id = 666").first()).not.toBeNull();
+  });
+
+  it("doesn't hold back invited logins or existing accounts", async () => {
+    await addUser(102, "bob");
+    await seedAccounts(MAX_NEW_ACCOUNTS_PER_DAY, Date.now());
+    expect((await portalLogin("bob", open)).back.status).toBe(302);
+    expect((await portalLogin("alice", open)).back.status).toBe(302);
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>();
+    expect(count?.n).toBe(MAX_NEW_ACCOUNTS_PER_DAY + 2);
+  });
+});
+
+describe("account deletion and OAuth", () => {
+  it("revokes MCP grants, so an old token stays dead even after signing up again", async () => {
+    const { back, clientId, verifier } = await signInMcp("alice");
+    const code = new URL(back.headers.get("Location") ?? "").searchParams.get("code") ?? "";
+    const token = await exchange(clientId, verifier, code);
+    expect((await call(worker, rpcRequest("tools/list", {}, token))).status).toBe(200);
+
+    const { jar } = await portalLogin("alice");
+    const deleted = await call(
+      worker,
+      req("/account/delete", jar, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN },
+        body: new URLSearchParams({ csrf: await csrfToken(testEnv(), 101), confirm: "ALICE" }),
+      }),
+    );
+    expect(deleted.status).toBe(200);
+    expect(await deleted.text()).toContain("Your account is deleted");
+    jar.take(deleted);
+    expect(jar.has("__Host-reef-session")).toBe(false);
+    expect(await env.DB.prepare("SELECT id FROM users WHERE id = 101").first()).toBeNull();
+
+    expect((await call(worker, rpcRequest("tools/list", {}, token))).status).toBe(401);
+    // The invite went with the account; in open mode the same GitHub account starts afresh.
+    expect((await portalLogin("alice")).back.status).toBe(403);
+    expect((await portalLogin("alice", testEnv({ signupMode: "open" }))).back.status).toBe(302);
+    expect((await call(worker, rpcRequest("tools/list", {}, token))).status).toBe(401);
   });
 });

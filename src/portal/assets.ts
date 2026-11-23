@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "067f00c2fd";
+export const ASSET_VERSION = "ba2fe89406";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -30,6 +30,9 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .nav a:hover,.nav a[aria-current=page]{color:var(--ink)}
 .nav a[aria-current=page]{background:var(--bg)}
 .me{margin-left:auto;display:flex;align-items:center;gap:10px}
+.me-link{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;border-radius:6px}
+.me-link:hover .me-login,.me-link[aria-current=page] .me-login{text-decoration:underline;text-underline-offset:2px}
+.prose h2{margin:28px 0 8px}.prose ul{margin:0 0 12px;padding-left:20px}.prose li+li{margin-top:4px}
 form{margin:0}
 .main{flex:1;padding-top:32px;padding-bottom:64px}
 [tabindex="-1"]:focus{outline:none}

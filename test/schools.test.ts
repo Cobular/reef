@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { SCHOOL_LIMITS } from "../src/config";
 import { createUpload, filesContext, ReefError, shareFile } from "../src/files/service";
 import { cleanupSchools } from "../src/schools/cleanup";
-import { insertMessage } from "../src/schools/repo";
+import { insertMessage, reserveInvites } from "../src/schools/repo";
 import {
   acceptInvite,
   checkUnread,
@@ -1061,5 +1061,85 @@ describe("school MCP tools", () => {
     expect(listed.text).toContain(`${id} "team": group; description "${one}"; active;`);
     expect(listed.text).toMatch(/"quiet": group; active;/);
     expect(listed.text.split("\n")).toHaveLength(3);
+  });
+});
+
+describe("daily invite limit", () => {
+  const LIMIT = SCHOOL_LIMITS.maxInvitesPerAccountPerDay;
+  const DAY = 86_400_000;
+
+  /** `n` accounts with IDs from 100; returns their logins. */
+  async function accounts(n: number): Promise<string[]> {
+    const logins = Array.from({ length: n }, (_, i) => `friend${i}`);
+    for (const [i, login] of logins.entries()) await addUser(100 + i, login);
+    return logins;
+  }
+
+  async function invitesSentRows() {
+    const { results } = await env.DB.prepare(
+      "SELECT day, user_id, sent FROM school_invites_sent ORDER BY day, user_id",
+    ).all<{ day: number; user_id: number; sent: number }>();
+    return results;
+  }
+
+  it("counts invitations across schools and refuses past the limit, saying when it resets", async () => {
+    const logins = await accounts(LIMIT + 2);
+    const now = Date.now();
+    const first = await createSchool(ctx(now), alice.userId, "one", "group", logins.slice(0, 15));
+    const second = await createSchool(ctx(now), alice.userId, "two", "group");
+
+    const over = await refusal(
+      inviteToSchool(ctx(now), alice.userId, second.school.id, logins.slice(15, 21)),
+    );
+    expect(over.status).toBe(429);
+    expect(over.message).toBe(
+      `You can send ${LIMIT} school invitations a day and have 5 left today, so these 6 weren’t sent. The count resets at 00:00 UTC.`,
+    );
+    expect(over.retryAfter).toBe(Math.ceil((now - (now % DAY) + DAY - now) / 1000));
+    expect(await listSchoolsFor(ctx(), 115)).toEqual([]);
+
+    await inviteToSchool(ctx(now), alice.userId, second.school.id, logins.slice(15, 20));
+    // Someone already invited isn't invited again, so it isn't counted.
+    const again = await inviteToSchool(ctx(now), alice.userId, second.school.id, ["friend15"]);
+    expect(again.invited).toEqual([]);
+    const pair = await refusal(createSchool(ctx(now), alice.userId, "p", "pair", ["friend21"]));
+    expect(pair.message).toContain("have 0 left today, so this one wasn’t sent");
+    // Declining doesn't hand an invitation back.
+    await declineInvite(ctx(now), 100, first.school.id);
+    expect(
+      (await refusal(createSchool(ctx(now), alice.userId, "p", "pair", ["friend21"]))).status,
+    ).toBe(429);
+    // A school with no one to invite needs no invitations.
+    await createSchool(ctx(now), alice.userId, "solo", "group");
+
+    // Each account has its own count, and the next UTC day starts afresh.
+    await createSchool(ctx(now), bob.userId, "bob's", "pair", ["friend21"]);
+    const tomorrow = now - (now % DAY) + DAY;
+    await createSchool(ctx(tomorrow), alice.userId, "p", "pair", ["friend21"]);
+    const day = Math.floor(now / DAY);
+    expect(await invitesSentRows()).toEqual([
+      { day, user_id: alice.userId, sent: LIMIT },
+      { day, user_id: bob.userId, sent: 1 },
+      { day: day + 1, user_id: alice.userId, sent: 1 },
+    ]);
+  });
+
+  it("never writes a count over the limit, even for a first batch bigger than it", async () => {
+    expect(await reserveInvites(env.DB, alice.userId, 1, LIMIT + 1, LIMIT)).toBe(false);
+    expect(await invitesSentRows()).toEqual([]);
+    expect(await reserveInvites(env.DB, alice.userId, 1, LIMIT, LIMIT)).toBe(true);
+    expect(await reserveInvites(env.DB, alice.userId, 1, 1, LIMIT)).toBe(false);
+    expect(await invitesSentRows()).toEqual([{ day: 1, user_id: alice.userId, sent: LIMIT }]);
+  });
+
+  it("is cleaned up by the cron job once the day is over", async () => {
+    await accounts(2);
+    const now = Date.now();
+    await createSchool(ctx(now - DAY), alice.userId, "old", "pair", ["friend0"]);
+    await createSchool(ctx(now), alice.userId, "new", "pair", ["friend1"]);
+    await cleanupSchools(env.DB, now, { messages: false });
+    expect(await invitesSentRows()).toEqual([
+      { day: Math.floor(now / DAY), user_id: alice.userId, sent: 1 },
+    ]);
   });
 });
