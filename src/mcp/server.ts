@@ -28,7 +28,7 @@ import {
   SHARE_FILE_DESCRIPTION,
 } from "./guidance";
 import { run } from "./result";
-import { memoJsonSchema } from "./schema";
+import { lenientInt, memoJsonSchema } from "./schema";
 import { registerSchoolTools } from "./schools";
 
 /** Props stored in the OAuth grant by completeAuthorization (see auth-mcp.ts). */
@@ -56,18 +56,13 @@ const logins = z.array(z.string().min(1).max(39)).max(10);
 const createUploadInput = memoJsonSchema(
   z.object({
     name: z.string().min(1).max(255).describe("File name, without a directory, e.g. report.pdf"),
-    size: z.number().int().min(0).describe("Exact file size in bytes, e.g. from `wc -c < file`"),
-    lifetime_minutes: z
-      .number()
-      .int()
-      .min(1)
-      .max(30)
+    size: lenientInt(z.number().int().min(0)).describe(
+      "Exact file size in bytes, e.g. from `wc -c < file`",
+    ),
+    lifetime_minutes: lenientInt(z.number().int().min(1).max(30))
       .optional()
       .describe("Minutes the file lives after the upload finishes. Default 10, at most 30."),
-    download_limit: z
-      .number()
-      .int()
-      .min(1)
+    download_limit: lenientInt(z.number().int().min(1))
       .optional()
       .describe("How many downloads may start. Omit for no limit."),
     share_with: logins

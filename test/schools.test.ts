@@ -694,6 +694,24 @@ describe("replies", () => {
       reply_to: 0,
     });
     expect(badArg.isError).toBe(true);
+    // Clients with a stale tool list send unknown fields as strings: digits are accepted.
+    const asString = await callTool(alice, "school_send", {
+      handle,
+      school: id,
+      text: "again",
+      reply_to: "1",
+    });
+    expect(asString.text).toContain(`No message with seq 1 in school "team" (${id}) to reply to.`);
+    for (const reply_to of ["", "1.5", "one", null]) {
+      const refused = await callTool(alice, "school_send", {
+        handle,
+        school: id,
+        text: "x",
+        reply_to,
+      });
+      expect(refused.isError, String(reply_to)).toBe(true);
+      expect(refused.text, String(reply_to)).not.toContain("to reply to.");
+    }
 
     const read = await callTool(alice, "school_read", { handle, school: id });
     const tag = read.text.match(/\[message 2 begin (\S+)\]/)?.[1] ?? "";
