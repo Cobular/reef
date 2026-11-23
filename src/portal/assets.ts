@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "4ba830e362";
+export const ASSET_VERSION = "a08d42fd4b";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -187,6 +187,8 @@ th{font-size:13px;color:var(--muted);border-top:0}
 td:last-child,th:last-child{text-align:right}
 .section-gap{margin-top:40px}
 .past>summary{cursor:pointer;color:var(--muted);font-weight:600;padding:8px 0;margin-bottom:8px}
+.connect-panel{max-width:40rem}
+.connect-panel .copy{margin-bottom:8px}
 .landing{padding-bottom:16px}
 .hero{max-width:46rem;padding:48px 0 48px}
 .hero h1{font-size:42px;line-height:1.1;letter-spacing:-.035em;margin-bottom:16px}

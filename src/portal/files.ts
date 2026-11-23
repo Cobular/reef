@@ -1,8 +1,10 @@
+import { publicOrigin } from "../config";
 import type { ListedFileView } from "../files/service";
 import { filesContext, listFiles } from "../files/service";
 import { html, type Raw } from "../lib/html";
 import {
   confirmForm,
+  connectPanel,
   emptyState,
   formatSize,
   looksLikeFileName,
@@ -100,6 +102,7 @@ ${
 <ul class="rows" aria-label="Recently expired files">${gone.map((v) => fileRow(p, v))}</ul>
 </details>`
     : ""
-}`;
+}
+${connectPanel(`${publicOrigin(p.env)}/mcp`)}`;
   return render(p, { title: "Files", section: "files" }, body);
 }

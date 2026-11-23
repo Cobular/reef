@@ -218,11 +218,14 @@ describe("pages and headers", () => {
     }
   });
 
-  it("has a quiet footer with the source and security policy", async () => {
+  it("has a quiet footer, and a folded connect panel with the MCP URL on files and schools", async () => {
     const body = await (await get("/files", bob)).text();
     expect(body).toContain('href="https://github.com/Cobular/reef"');
     expect(body).toContain('href="https://github.com/Cobular/reef/security/policy"');
     expect(body).not.toContain("foot-mcp");
+    expect(body).toContain(`<code id="connect-mcp">${ORIGIN}/mcp</code>`);
+    const schools = await (await get("/schools", bob)).text();
+    expect(schools).toContain(`<code id="connect-mcp">${ORIGIN}/mcp</code>`);
     expect(body).not.toContain("Files last minutes.</footer>");
   });
 

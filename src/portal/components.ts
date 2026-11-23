@@ -196,6 +196,14 @@ export function tide(expiresAt: number, lifetimeMinutes: number, now: number): R
 </div>`;
 }
 
+/** A folded "Connect an agent" panel for signed-in pages, so the MCP URL is always one click away. */
+export function connectPanel(mcpUrl: string): Raw {
+  return html`<details class="past connect-panel section-gap"><summary>Connect an agent</summary>
+<p class="small muted">Add this URL to any agent as a remote MCP server (some call it a custom connector), then sign in with GitHub when it asks.</p>
+${copyBlock("connect-mcp", mcpUrl, "Copy the MCP server URL")}
+</details>`;
+}
+
 /** A read-only block with a copy button (shown by the script) and a select-all fallback. */
 export function copyBlock(
   id: string,
