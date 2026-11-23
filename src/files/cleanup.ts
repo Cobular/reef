@@ -1,6 +1,6 @@
 import { ROW_RETENTION_MS, UPLOAD_TOKEN_TTL_MS } from "../config";
 import { logEvent } from "../lib/log";
-import { markDeleted } from "./repo";
+import { markDeleted, refreshServiceStats } from "./repo";
 import { Storage } from "./storage";
 
 /** Uploads still pending this long after creation can no longer finish (their token expired). */
@@ -36,8 +36,9 @@ export async function cleanup(env: Env, now = Date.now()): Promise<CleanupResult
 
   const stale = await db
     .prepare(
-      `SELECT id, r2_upload_id FROM files WHERE state = 'pending' AND created_at <= ?
-       ORDER BY created_at LIMIT ?`,
+      // Pending rows are only the uploads in flight, so the (state, expires_at) index's state
+      // prefix is enough; no index on created_at is kept for this.
+      "SELECT id, r2_upload_id FROM files WHERE state = 'pending' AND created_at <= ? LIMIT ?",
     )
     .bind(now - STALE_UPLOAD_MS, BATCH)
     .all<{ id: string; r2_upload_id: string | null }>();
@@ -61,6 +62,9 @@ export async function cleanup(env: Env, now = Date.now()): Promise<CleanupResult
     db
       .prepare("DELETE FROM files WHERE state = 'deleted' AND expires_at <= ?")
       .bind(now - ROW_RETENTION_MS),
+    // After the purge: serviceResidentBytes relies on no file row being deleted between two
+    // refreshes.
+    refreshServiceStats(db),
   ]);
   const result = {
     expired: expiredIds.length,

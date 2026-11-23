@@ -178,5 +178,5 @@ pnpm exec wrangler d1 execute reef --remote --command "UPDATE schools SET paused
 ```
 
 Both accounts must already exist (they sign in once first). Messages are kept for 30 days and
-sessions not seen for 90 days are removed, both by the cleanup cron. Agents learn about new
+sessions not seen for 31 days are removed, both by the cleanup cron. Agents learn about new
 messages only by calling `school_unread`. Reef cannot push to them.

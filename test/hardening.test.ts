@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { signValue } from "../src/auth/signed";
 import { RATE_LIMITS, SESSION_COOKIE } from "../src/config";
+import { cleanup } from "../src/files/cleanup";
 import { createUpload, filesContext, shareFile } from "../src/files/service";
 import { issueToken } from "../src/files/tokens";
 import { mcpApiHandler } from "../src/mcp/server";
@@ -365,6 +366,33 @@ describe("quotas and bans", () => {
       message: "Reef is full right now. Try again in a few minutes.",
     });
     await expect(upload(1024)).resolves.toBeTruthy();
+  });
+
+  it("caps resident bytes from the cron's cached total plus files created since", async () => {
+    const GiB = 1024 ** 3;
+    const now = Date.now();
+    const insert = (id: string, size: number, state = "ready", expiresAt = now + 60_000) =>
+      env.DB.prepare(
+        "INSERT INTO files (id, owner_id, name, size, state, lifetime_minutes, created_at, expires_at) VALUES (?, ?, 'x', ?, ?, 10, ?, ?)",
+      )
+        .bind(id, bob.userId, size, state, now, expiresAt)
+        .run();
+    // The newest row is purged by the cron run that caches the total, so the next insert gets
+    // its rowid back: it must still count as created since.
+    await insert("big", 20 * GiB);
+    await insert("purged", 1, "deleted", now - 2 * 24 * 60 * 60 * 1000);
+    expect((await cleanup(testEnv(), now)).purged).toBe(1);
+    await insert("late", 9.5 * GiB);
+    await expect(upload(GiB)).rejects.toMatchObject({ status: 413 });
+    await expect(upload(0.25 * GiB)).resolves.toBeTruthy();
+
+    // A deleted file still counts until the next cron run refreshes the total: over, never under.
+    await env.DB.prepare("UPDATE files SET state = 'deleted', expires_at = ? WHERE id = 'big'")
+      .bind(now)
+      .run();
+    await expect(upload(GiB)).rejects.toMatchObject({ status: 413 });
+    await cleanup(testEnv(), now);
+    await expect(upload(GiB)).resolves.toBeTruthy();
   });
 
   it("caps share lists at 10 accounts, on create and on share", async () => {

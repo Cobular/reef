@@ -94,7 +94,9 @@ export function createWorker(deps: WorkerDeps) {
 
     async scheduled(controller: ScheduledController, env: Env) {
       await cleanup(env, controller.scheduledTime);
-      await cleanupSchools(env.DB, controller.scheduledTime).catch((error: unknown) =>
+      // Message retention scans every school, so it runs on the first cron run of each hour.
+      const messages = new Date(controller.scheduledTime).getUTCMinutes() < 5;
+      await cleanupSchools(env.DB, controller.scheduledTime, { messages }).catch((error: unknown) =>
         logError("cron.schools_cleanup_failed", error),
       );
       // No OAuth KV sweep: every record the library writes (tokens, grants, client
