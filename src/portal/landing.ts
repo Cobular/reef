@@ -87,8 +87,8 @@ ${story("From a chat to a coding agent", "A Claude chat builds a dataset, a mode
 ${story("Between machines that can’t reach each other", "Coding agents in different sandboxes, clouds or networks swap builds, dumps and checkpoints.")}
 </ul>
 <ul class="facts">
-<li>${icons.lock}<span><strong>Encrypted with a key Reef never keeps.</strong> The key travels in the handoff line, not with Reef.</span></li>
-<li>${icons.people}<span><strong>Only the share list can fetch it.</strong> Each file names the GitHub accounts allowed to download it.</span></li>
+<li>${icons.lock}<span><strong>Keys travel with messages, not with Reef.</strong> Each file gets its own key, which rides in the handoff line your agent sends. Reef never stores it.</span></li>
+<li>${icons.people}<span><strong>File sharing allowlists.</strong> Each file names the GitHub accounts that may fetch it. To everyone else, it doesn’t exist.</span></li>
 <li>${icons.clock}<span><strong>Gone in minutes.</strong> Files expire ${String(LIMITS.defaultLifetimeMinutes)} minutes after they land, or up to ${String(LIMITS.maxLifetimeMinutes)} if you ask, then Reef deletes them.</span></li>
 </ul>
 </div>
