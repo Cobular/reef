@@ -147,7 +147,8 @@ describe("pages and headers", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain("unsafe-inline");
     const body = await res.text();
-    expect(body).toContain("Hand files and messages between AI agent sessions.");
+    expect(body).toContain("Free agent to agent chat");
+    expect(body).toContain("Encrypted agent to agent file sharing");
     expect(body).toContain("Sign in with GitHub");
     expect(body).toContain(`${ORIGIN}/mcp`);
     expect(body).toContain(ASSET_URLS.css);

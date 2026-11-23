@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "7c7340566e";
+export const ASSET_VERSION = "42905e5155";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -190,14 +190,51 @@ th{font-size:13px;color:var(--muted);border-top:0}
 td:last-child,th:last-child{text-align:right}
 .section-gap{margin-top:40px}
 .past>summary{cursor:pointer;color:var(--muted);font-weight:600;padding:8px 0;margin-bottom:8px}
-.hero{max-width:42rem;padding:40px 0 24px}
-.hero h1{font-size:30px;letter-spacing:-.025em;margin-bottom:14px}
-.lede{font-size:17px;color:var(--muted);margin-bottom:28px}
-.facts{list-style:none;margin:0 0 32px;padding:0;display:grid;gap:12px}
+.landing{padding-bottom:16px}
+.hero{max-width:46rem;padding:48px 0 48px}
+.hero h1{font-size:42px;line-height:1.1;letter-spacing:-.035em;margin-bottom:16px}
+.lede{font-size:18px;color:var(--muted);margin-bottom:28px;max-width:40rem}
+.hero-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.halves{list-style:none;margin:40px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.halves a{display:flex;gap:12px;height:100%;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);text-decoration:none;transition:border-color .14s}
+.halves a:hover{border-color:var(--sea)}
+.halves svg,.facts svg,.demo-name svg{flex:none;color:var(--sea)}
+.halves svg{margin-top:2px}
+.halves strong{display:block;margin-bottom:2px}
+.halves .muted{font-size:14px}
+.half{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px;align-items:center;padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:16px}
+.half.flip .demo{order:-1}
+.kicker{color:var(--coral);font-size:13px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
+.half h2,.connect h2{font-size:28px;letter-spacing:-.025em;margin-bottom:12px}
+.half-lede{font-size:16px;color:var(--muted)}
+.stories{list-style:none;margin:24px 0;padding:0;display:grid;gap:16px}
+.stories li{padding-left:14px;border-left:2px solid color-mix(in srgb,var(--sea) 35%,var(--line))}
+.stories h3{font-size:15px;font-weight:600;margin:0 0 2px}
+.stories p{margin:0;color:var(--muted)}
+.fine{font-size:13px;color:var(--muted);margin:0}
+.facts{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .facts li{display:flex;gap:12px}
-.facts svg{flex:none;margin-top:2px}
-.mcp{margin-top:36px;max-width:34rem}
-@media (max-width:720px){.wrap{padding:0 16px}.top-in{flex-wrap:wrap;gap:0 16px;padding-top:10px}.nav{order:3;width:100%;margin:6px -10px 4px}.me-login{display:none}.main{padding-top:24px}.row{grid-template-columns:1fr;gap:12px;padding:16px}.row.file,.row.link{grid-template-columns:1fr}.row-actions{justify-content:flex-start}.row.file .row-actions{justify-content:flex-end}.confirm-panel{right:auto;left:0}.row.file .confirm-panel{left:auto;right:0}.split{grid-template-columns:1fr}.kv{grid-template-columns:1fr;gap:2px}.kv dd{margin-bottom:10px}.copy{flex-direction:column;align-items:stretch}.hero{padding-top:16px}.card{padding:18px}.inline-form{flex-direction:column;align-items:stretch}}
+.facts svg{margin-top:2px}
+.demo{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgb(14 42 58/.05),0 18px 40px -18px rgb(14 42 58/.28)}
+.demo-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--bg)}
+.demo-name{display:inline-flex;align-items:center;gap:8px;min-width:0;font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.demo .msg{padding:12px 16px}
+.demo .msg-text{margin-top:4px}
+.demo-a,.demo-b,.demo-c{--c:var(--sea);background:color-mix(in srgb,var(--c) 18%,var(--surface));color:var(--c)}
+.demo-b{--c:var(--coral)}.demo-c{--c:var(--ok)}
+.demo-body{padding:18px 16px}
+.demo .kv{grid-template-columns:7rem minmax(0,1fr);gap:6px 12px}
+.demo-tide{margin:18px 0 20px}
+.demo-label{margin:0 0 6px}
+.demo-code{display:block;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:12.5px;line-height:1.6;overflow-wrap:anywhere}
+.connect{max-width:44rem;padding:64px 0 0;border-top:1px solid var(--line);scroll-margin-top:16px}
+.connect h2{margin-bottom:24px}
+.steps{list-style:none;counter-reset:step;margin:0 0 32px;padding:0;display:grid;gap:22px}
+.steps li{counter-increment:step;position:relative;padding-left:42px;color:var(--muted)}
+.steps li::before{content:counter(step);position:absolute;left:0;top:-1px;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--bg);font-size:13px;font-weight:650}
+.steps strong{display:block;color:var(--ink)}
+.steps .copy{margin-top:12px}
+@media (max-width:720px){.wrap{padding:0 16px}.top-in{flex-wrap:wrap;gap:0 16px;padding-top:10px}.nav{order:3;width:100%;margin:6px -10px 4px}.me-login{display:none}.main{padding-top:24px}.row{grid-template-columns:1fr;gap:12px;padding:16px}.row.file,.row.link{grid-template-columns:1fr}.row-actions{justify-content:flex-start}.row.file .row-actions{justify-content:flex-end}.confirm-panel{right:auto;left:0}.row.file .confirm-panel{left:auto;right:0}.split{grid-template-columns:1fr}.kv{grid-template-columns:1fr;gap:2px}.kv dd{margin-bottom:10px}.copy{flex-direction:column;align-items:stretch}.hero{padding:16px 0 40px}.hero h1{font-size:32px}.lede{font-size:17px}.halves{grid-template-columns:1fr}.half{grid-template-columns:1fr;gap:28px;padding:44px 0}.half.flip .demo{order:0}.half h2,.connect h2{font-size:24px}.connect{padding-top:44px}.card{padding:18px}.inline-form{flex-direction:column;align-items:stretch}}
 @media (max-width:420px){.seg label{padding:8px 10px;font-size:14px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 `;
