@@ -4,7 +4,6 @@ import { copyBlock, icons, sessionChip } from "./components";
 import type { Portal } from "./context";
 import { render } from "./layout";
 
-
 function story(title: string, body: string): Raw {
   return html`<li><h3>${title}</h3><p>${body}</p></li>`;
 }
