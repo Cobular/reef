@@ -1,7 +1,9 @@
 import type { GitHubApi } from "../auth/github";
-import { logout, startLogin } from "../auth/portal";
+import { logout, sessionUserId, startLogin } from "../auth/portal";
+import { rateLimited } from "../guard";
 import { redirect, safeNext, text } from "../lib/http";
 import { logError } from "../lib/log";
+import { overLimit } from "../lib/rate-limit";
 import { ADMIN_ACTIONS, type AdminAction, adminAction, adminPage } from "./admin";
 import { serveAsset, serveFaviconIco } from "./assets";
 import { formCsrfOk, type Portal, portalContext, readForm, type SignedIn } from "./context";
@@ -55,6 +57,12 @@ export async function handlePortal(
       statusText: response.statusText,
       headers: response.headers,
     });
+  }
+  // Per-account limit on form posts, from the signed cookie alone, before any D1 read.
+  if (request.method === "POST") {
+    const uid = await sessionUserId(request, env);
+    if (uid !== null && (await overLimit(env, "write", String(uid))))
+      return rateLimited(request, env, "write");
   }
   const p = await portalContext(request, env, partSize);
   try {

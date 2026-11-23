@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
+import { RATE_LIMITS } from "../config";
 import { utc } from "../files/commands";
 import { getUser } from "../files/repo";
 import {
@@ -10,8 +11,11 @@ import {
   filesContext,
   getDownload,
   listFiles,
+  ReefError,
   shareFile,
 } from "../files/service";
+import { mcpRefusal } from "../guard";
+import { limitMessage, overLimit } from "../lib/rate-limit";
 import {
   bullets,
   CREATE_UPLOAD_DESCRIPTION,
@@ -107,6 +111,8 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     },
     (input) =>
       run("create_upload", async () => {
+        if (await overLimit(env, "write", String(caller.userId)))
+          throw new ReefError(429, limitMessage("write"), RATE_LIMITS.write.period);
         const c = ctx();
         const up = await createUpload(c, caller, input);
         const lines = [
@@ -245,6 +251,11 @@ export function mcpApiHandler(partSize: number) {
       if (typeof props?.userId !== "number" || typeof props.login !== "string") {
         return new Response("Unauthorized", { status: 401 });
       }
+      // Before the D1 lookup; a rate-limited tool call still gets a readable tool error.
+      if (await overLimit(env, "mcp", String(props.userId)))
+        return mcpRefusal(request, 429, limitMessage("mcp"), {
+          "Retry-After": String(RATE_LIMITS.mcp.period),
+        });
       const user = await getUser(env.DB, props.userId);
       if (!user || user.banned) {
         return Response.json({ error: "account_suspended" }, { status: 403 });

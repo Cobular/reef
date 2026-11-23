@@ -108,13 +108,38 @@ export function ssecBucket(inner: R2Bucket = env.BUCKET): R2Bucket {
 export interface TestEnvOptions {
   signupMode?: "invite" | "open";
   bucket?: R2Bucket;
+  /** Rate limiters by binding name (RL_IP, ...); any not given always allow. */
+  limiters?: Partial<Record<RateLimitBinding, RateLimit>>;
 }
+
+export type RateLimitBinding = "RL_IP" | "RL_AUTH" | "RL_MCP" | "RL_WRITE" | "RL_DATA";
+
+/** A rate limiter stub that records each key and refuses those `deny` picks (default all). */
+export function stubLimiter(deny: (key: string) => boolean = () => true) {
+  const keys: string[] = [];
+  const limiter: RateLimit = {
+    async limit({ key }) {
+      keys.push(key);
+      return { success: !deny(key) };
+    },
+  };
+  return { limiter, keys };
+}
+
+const allow = stubLimiter(() => false).limiter;
 
 export function testEnv(options: TestEnvOptions = {}): Env {
   return {
     ...env,
     BUCKET: options.bucket ?? ssecBucket(),
     SIGNUP_MODE: options.signupMode ?? "invite",
+    // The real local limiters would count across tests; stubs keep tests independent.
+    RL_IP: allow,
+    RL_AUTH: allow,
+    RL_MCP: allow,
+    RL_WRITE: allow,
+    RL_DATA: allow,
+    ...options.limiters,
   } as unknown as Env;
 }
 
