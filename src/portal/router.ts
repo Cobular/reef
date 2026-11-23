@@ -12,7 +12,7 @@ import { filesPage } from "./files";
 import { landingPage } from "./landing";
 import { errorScreen, forbidden, notFound } from "./layout";
 import { SCHOOL_ACTIONS, type SchoolAction, schoolAction, schoolPage } from "./school";
-import { createSchoolFromPortal, schoolsPage } from "./schools";
+import { createSchoolFromPortal, newSchoolPage, schoolsPage } from "./schools";
 import { createBrowserUpload, uploadPage } from "./upload";
 
 const ID = "([a-z0-9]{1,64})";
@@ -149,6 +149,7 @@ async function signedIn(p: SignedIn): Promise<Response> {
   }
 
   if (path === "/schools" && get) return schoolsPage(p);
+  if (path === "/schools/new" && get) return newSchoolPage(p);
   if (path === "/schools/new" && post) return createSchoolFromPortal(p);
   if (school) return schoolPage(p, school[1] as string);
   if (schoolPost) {

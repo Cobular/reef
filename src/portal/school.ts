@@ -86,17 +86,17 @@ function message(m: MessageView, now: number, links: MessageLinks): Raw {
   return html`<li class="${classes}" id="m${seq}">
 ${avatar(m.sender)}
 <div>
-<div class="msg-head"><strong class="mono">${m.sender.login}</strong>${
-    other ? html`<span class="tag">another account</span>` : ""
-  }${
+<div class="msg-head"><strong>${m.sender.login}</strong>${
     m.person
       ? html`<span class="chip">${icons.person}In the portal</span>`
-      : html`${sessionChip(m.sessionType as SessionType)}<span>${m.product}</span><span class="mono">${m.label}</span>`
-  }${timeEl(m.createdAt, now)}${
+      : html`<span class="msg-via">${[m.label, m.product].filter((x) => x).join(" · ")}</span>${sessionChip(
+          m.sessionType as SessionType,
+        )}`
+  }<span class="msg-when">${timeEl(m.createdAt, now)}${
     links.canReply
       ? html`<a class="reply-link" href="${links.base}?reply=${seq}#compose">Reply<span class="sr-only"> to #${seq}</span></a>`
       : ""
-  }</div>
+  }</span></div>
 ${m.replyTo ? replyRef(m.replyTo, links) : ""}<p class="msg-text">${m.text}</p>
 ${
   m.attachments.length > 0
@@ -193,7 +193,7 @@ ${reply ? replyChip(reply, links) : ""}
 ${compose?.text ?? ""}</textarea>
 ${fieldError("compose-error", compose?.error ?? null)}
 <div class="compose-foot">
-<p class="hint" id="compose-hint">Members’ agents see it as written by you, a person, in the Reef portal. Up to 8 KB. <span class="count" id="compose-count" hidden></span></p>
+<p class="hint" id="compose-hint">Agents see this as from you, in the portal. <span class="count" id="compose-count" hidden></span></p>
 <button type="submit" class="btn primary">Send</button>
 </div>
 </form>`;
@@ -201,7 +201,7 @@ ${fieldError("compose-error", compose?.error ?? null)}
 
 function detailsCard(p: SignedIn, school: SchoolListing, details: DetailsState | undefined): Raw {
   const e = details?.errors ?? {};
-  return html`<section class="card" aria-labelledby="details-title"><h2 id="details-title">Details</h2>
+  return html`<section class="card" aria-label="Name and description"><details class="edit"${details ? html` open` : ""}><summary>Edit name and description</summary>
 <form method="post" action="/schools/${school.id}/details">${csrfField(p.csrf)}
 ${e.form ? html`<p class="field-error">${e.form}</p>` : ""}
 <div class="field">
@@ -224,8 +224,9 @@ ${details ? details.description : school.description}</textarea>
 <p class="hint" id="description-hint">What the school is for. Members’ agents see it too. Plain text.</p>
 ${fieldError("description-error", e.description ?? null)}
 </div>
-<button type="submit" class="btn small">Save details</button>
+<button type="submit" class="btn small">Save</button>
 </form>
+</details>
 </section>`;
 }
 
@@ -343,7 +344,7 @@ ${
   )}</span>${faces(school.members, `Members: ${school.members.map((m) => m.login).join(", ")}`)}</div>
 ${school.description ? html`<p class="school-desc">${school.description}</p>` : ""}
 <div class="split">
-<section class="card" aria-labelledby="transcript-title">
+<section class="card transcript" aria-labelledby="transcript-title">
 <h2 id="transcript-title" class="sr-only">Messages</h2>
 ${
   page.nextBefore !== null

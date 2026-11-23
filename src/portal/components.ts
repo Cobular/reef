@@ -157,7 +157,7 @@ export function sharedWith(
   }</ul>`;
 }
 
-export type PillKind = "ready" | "uploading" | "expired" | "paused" | "pending";
+export type PillKind = "ready" | "uploading" | "expired" | "paused" | "pending" | "banned";
 
 const PILL_TEXT: Record<PillKind, string> = {
   ready: "Ready",
@@ -165,6 +165,7 @@ const PILL_TEXT: Record<PillKind, string> = {
   expired: "Expired",
   paused: "Paused",
   pending: "Pending invite",
+  banned: "Banned",
 };
 
 export function pill(kind: PillKind, text = PILL_TEXT[kind]): Raw {

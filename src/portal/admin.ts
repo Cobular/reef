@@ -46,7 +46,7 @@ ${
       u,
     ) => html`<tr><td>${avatar({ id: u.id, login: u.login }, true)} <span class="mono">${u.login}</span></td>
 <td>${timeEl(u.created_at, p.now)}</td>
-<td>${u.banned ? html`<span class="pill paused">Banned</span>` : "Active"}</td>
+<td>${u.banned ? pill("banned") : pill("ready", "Active")}</td>
 <td>${
       u.id === p.user.userId
         ? html`<span class="small muted">you</span>`

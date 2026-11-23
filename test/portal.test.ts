@@ -506,7 +506,9 @@ describe("schools", () => {
     expect(body.indexOf("first &lt;script&gt;")).toBeLessThan(body.indexOf("second"));
     expect(body).toContain("diagram.png");
     expect(body).toContain(`/files/${file.file.id}`);
-    expect(body).toContain("another account");
+    expect(body).toContain('<li class="msg other"');
+    expect(body).not.toContain("another account");
+    expect(body).not.toContain("</span>}");
     expectCleanHtml(body);
 
     // Nothing read yet: the divider sits before the first message.
@@ -615,9 +617,12 @@ describe("schools", () => {
     expect(await followFlash(created, bob)).toContain(
       '<p class="school-desc">Where my agents ask for help.</p>',
     );
-    const form = await (await get("/schools", bob)).text();
+    const list = await (await get("/schools", bob)).text();
+    expect(list).toContain('href="/schools/new"');
+    expect(list).toContain('<p class="row-desc">Where my agents ask for help.</p>');
+    expectCleanHtml(list);
+    const form = await (await get("/schools/new", bob)).text();
     expect(form).toContain('id="school-description" name="description"');
-    expect(form).toContain('<p class="row-desc">Where my agents ask for help.</p>');
     expectCleanHtml(form);
 
     const max = SCHOOL_LIMITS.maxSchoolDescriptionLength;
