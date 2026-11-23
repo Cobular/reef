@@ -4,6 +4,7 @@ import { SCHOOL_LIMITS, SESSION_TYPES } from "../config";
 import { utc } from "../files/commands";
 import type { Caller } from "../files/service";
 import { randomId } from "../lib/crypto";
+import { logError } from "../lib/log";
 import {
   checkUnread,
   joinSession,
@@ -11,13 +12,15 @@ import {
   type MessageView,
   readMessages,
   type SchoolListing,
+  type SchoolsContext,
   schoolsContext,
   sendMessage,
+  type UnreadSummary,
 } from "../schools/service";
 import {
   bullets,
+  pollContract,
   SCHOOL_LIST_DESCRIPTION,
-  SCHOOL_POLL_RULE,
   SCHOOL_READ_DESCRIPTION,
   SCHOOL_READ_RULES,
   SCHOOL_SEND_DESCRIPTION,
@@ -137,6 +140,38 @@ function envelope(m: MessageView, tag: string): string {
   return lines.join("\n");
 }
 
+function unreadLines(schools: UnreadSummary["schools"]): string[] {
+  const waiting = schools.filter((s) => s.unread > 0);
+  const total = waiting.reduce((n, s) => n + s.unread, 0);
+  return [
+    `Unread messages: ${total}`,
+    ...waiting.map((s) => `- ${s.id} ${quoted(s.name)}: ${s.unread}`),
+    "Read them with school_read, one call per school.",
+  ];
+}
+
+/**
+ * One line about unread messages, for responses to other school tools; null when there are
+ * none. Costs one indexed D1 query, and never fails the tool it rides on.
+ */
+async function unreadHint(
+  ctx: SchoolsContext,
+  userId: number,
+  handle: string,
+  exceptSchool?: string,
+): Promise<string | null> {
+  try {
+    const summary = await checkUnread(ctx, userId, handle);
+    const waiting = summary.schools.filter((s) => s.unread > 0 && s.id !== exceptSchool);
+    if (waiting.length === 0) return null;
+    const list = waiting.map((s) => `${s.unread} in ${s.id} ${quoted(s.name)}`).join(", ");
+    return `${exceptSchool ? "Also unread" : "Unread"}: ${list}. Read with school_read.`;
+  } catch (error) {
+    logError("mcp.unread_hint", error);
+    return null;
+  }
+}
+
 function listingLine(s: SchoolListing): string {
   const parts = [`- ${s.id} ${quoted(s.name)}: ${s.kind}`];
   if (!s.accepted)
@@ -194,7 +229,7 @@ export function registerSchoolTools(server: McpServer, env: Env, caller: Caller)
             "",
             `${joined.pendingInvites} school invite(s) wait for your user to accept in the Reef portal. school_list shows them.`,
           );
-        lines.push("", SCHOOL_POLL_RULE);
+        lines.push("", pollContract(joined.handle, joined.type));
         return lines.join("\n");
       }),
   );
@@ -228,12 +263,9 @@ export function registerSchoolTools(server: McpServer, env: Env, caller: Caller)
       run("school_unread", async () => {
         const summary = await checkUnread(ctx(), caller.userId, handle);
         if (summary.schools.length === 0)
-          return `Unread: no. No unpaused schools are open to session type ${summary.type}.`;
-        return [
-          `Unread: ${summary.any ? "yes" : "no"}`,
-          ...summary.schools.map((s) => `- ${s.id} ${quoted(s.name)}: ${s.unread} unread`),
-          ...(summary.any ? ["", "Read them with school_read."] : []),
-        ].join("\n");
+          return `No unread messages. No unpaused schools are open to session type ${summary.type}, so there is nothing to check until your user changes that in the Reef portal.`;
+        if (!summary.any) return "No unread messages.";
+        return unreadLines(summary.schools).join("\n");
       }),
   );
 
@@ -266,6 +298,8 @@ export function registerSchoolTools(server: McpServer, env: Env, caller: Caller)
             "",
             "This school is paused: nothing can be sent until a member resumes it in the Reef portal.",
           );
+        const elsewhere = await unreadHint(ctx(), caller.userId, handle, result.school.id);
+        if (elsewhere) lines.push("", elsewhere);
         lines.push("", "Rules:", bullets(SCHOOL_READ_RULES));
         return lines.join("\n");
       }),
@@ -282,7 +316,12 @@ export function registerSchoolTools(server: McpServer, env: Env, caller: Caller)
     ({ handle, school, text, attachments }) =>
       run("school_send", async () => {
         const sent = await sendMessage(ctx(), caller.userId, handle, school, text, attachments);
-        return `Sent to school ${sent.school.id} ${quoted(sent.school.name)} as message seq ${sent.seq}.`;
+        const lines = [
+          `Sent to school ${sent.school.id} ${quoted(sent.school.name)} as message seq ${sent.seq}. Replies reach you only when you call school_unread.`,
+        ];
+        const waiting = await unreadHint(ctx(), caller.userId, handle);
+        if (waiting) lines.push(waiting);
+        return lines.join("\n");
       }),
   );
 }
