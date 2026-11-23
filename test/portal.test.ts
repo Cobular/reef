@@ -270,6 +270,12 @@ describe("CSRF", () => {
       { origin: "https://evil.example" },
     );
     expect(crossSite.status).toBe(403);
+    // Browsers send `Origin: null` on form posts from no-referrer pages; that is refused, so
+    // the pages must use a policy that keeps the real origin for same-origin posts.
+    expect(
+      (await post("/admin/invites/add", admin, { login: "x5" }, { origin: "null" })).status,
+    ).toBe(403);
+    expect((await get("/admin", admin)).headers.get("Referrer-Policy")).toBe("same-origin");
     expect(await crossSite.text()).toContain("That form has expired");
     expect((await listInvites(env.DB)).length).toBe(before);
     // No Origin header at all (some privacy settings strip it) still works with the token.

@@ -49,7 +49,9 @@ export const STANDALONE_CSP =
 const SECURITY_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
+  // Not "no-referrer": under that policy browsers send `Origin: null` on form posts, which the
+  // portal's CSRF check rightly refuses. "same-origin" still sends nothing to other sites.
+  "Referrer-Policy": "same-origin",
   "Cache-Control": "no-store",
 };
 
