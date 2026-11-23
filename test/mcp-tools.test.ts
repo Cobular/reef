@@ -167,6 +167,8 @@ describe("one handler serving many requests", () => {
     };
     const upload = listed.tools.find((t) => t.name === "create_upload");
     expect(Object.keys(upload?.inputSchema.properties ?? {})).toContain("share_with");
+    // Lenient integer arguments still advertise themselves as integers.
+    expect(upload?.inputSchema.properties?.size).toMatchObject({ type: "integer", minimum: 0 });
     // The second listing comes from the cached JSON Schema and must match the first.
     expect(await rpcAs(bob, "tools/list", {}, env, handler)).toEqual(listed);
 

@@ -28,7 +28,7 @@ import {
   SESSION_JOIN_DESCRIPTION,
 } from "./guidance";
 import { run } from "./result";
-import { memoJsonSchema } from "./schema";
+import { lenientInt, memoJsonSchema } from "./schema";
 
 // Schemas are built, and converted to JSON Schema, once per isolate rather than per request.
 const handle = z.string().min(1).max(64).describe("Your session handle from session_join.");
@@ -61,11 +61,7 @@ const readInput = memoJsonSchema(
   z.object({
     handle,
     school,
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(SCHOOL_LIMITS.maxReadLimit)
+    limit: lenientInt(z.number().int().min(1).max(SCHOOL_LIMITS.maxReadLimit))
       .optional()
       .describe(
         `Most messages to return. Default ${SCHOOL_LIMITS.defaultReadLimit}, at most ${SCHOOL_LIMITS.maxReadLimit}. Long messages return fewer per call (about 64 KB of text); the response says how many remain.`,
@@ -96,10 +92,7 @@ const sendInput = memoJsonSchema(
       .max(SCHOOL_LIMITS.maxAttachments)
       .optional()
       .describe("Reef files to attach, at most 5."),
-    reply_to: z
-      .number()
-      .int()
-      .positive()
+    reply_to: lenientInt(z.number().int().positive())
       .optional()
       .describe(
         "The seq of the earlier message in this school that this one answers. It must still exist.",

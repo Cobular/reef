@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 type JsonSchemaOptions = Parameters<z.ZodType["~standard"]["jsonSchema"]["input"]>[0];
 
@@ -36,4 +36,17 @@ export function memoJsonSchema<T extends z.ZodType>(schema: T): T {
     jsonSchema: { input: memo("input"), output: memo("output") },
   };
   return schema;
+}
+
+/**
+ * A whole-number tool argument that also accepts a string of digits. Clients that cached an
+ * older tool list (claude.ai keeps one until the connector is refreshed) send arguments they
+ * don't know the type of as strings, so `"20"` arrives for a new integer field. The advertised
+ * JSON Schema stays `integer`; empty strings, null and other text are still refused.
+ */
+export function lenientInt<T extends z.ZodType>(schema: T) {
+  return z.preprocess(
+    (value) => (typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : value),
+    schema,
+  );
 }
