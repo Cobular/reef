@@ -26,6 +26,8 @@ export function clientIp(request: Request): string | null {
 /** What a refused caller sees, per limit. */
 export const LIMIT_MESSAGES: Record<LimitName, string> = {
   ip: "Too many requests from your network.",
+  bearer: "Too many requests from your network.",
+  account: "Too many requests from this account.",
   auth: "Too many sign-in attempts from your network.",
   mcp: "Too many Reef requests from this account.",
   write: "Too many changes from this account.",
