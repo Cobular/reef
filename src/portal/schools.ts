@@ -1,4 +1,4 @@
-import { SCHOOL_LIMITS } from "../config";
+import { publicOrigin, SCHOOL_LIMITS } from "../config";
 import { ReefError } from "../files/service";
 import { html, type Raw } from "../lib/html";
 import {
@@ -7,7 +7,16 @@ import {
   type SchoolListing,
   schoolsContext,
 } from "../schools/service";
-import { csrfField, emptyState, faces, fieldError, pill, postButton, timeEl } from "./components";
+import {
+  connectPanel,
+  csrfField,
+  emptyState,
+  faces,
+  fieldError,
+  pill,
+  postButton,
+  timeEl,
+} from "./components";
 import { formCsrfOk, loginList, readForm, type SignedIn, seeOther } from "./context";
 import { forbidden, render } from "./layout";
 
@@ -163,7 +172,8 @@ ${
       )
 }
 </section>
-<div class="section-gap">${newSchoolForm(p, state)}</div>`;
+<div class="section-gap">${newSchoolForm(p, state)}</div>
+${connectPanel(`${publicOrigin(p.env)}/mcp`)}`;
   return render(p, { title: "Schools", section: "schools", status }, body);
 }
 

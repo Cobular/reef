@@ -1,4 +1,3 @@
-import { publicOrigin } from "../config";
 import { html, htmlResponse, PORTAL_CSP, type Raw } from "../lib/html";
 import { ASSET_URLS } from "./assets";
 import { avatar, csrfField, flashBanner, waveMark } from "./components";
@@ -58,7 +57,7 @@ ${header(p, options.section ?? null)}
 ${showFlash ? flashBanner(p.flash) : ""}
 ${body}
 </main>
-<footer class="foot wrap"><a href="https://github.com/Cobular/reef">Source</a><a href="https://github.com/Cobular/reef/security/policy">Security</a><span class="foot-mcp">MCP <code id="foot-mcp">${publicOrigin(p.env)}/mcp</code><button type="button" class="btn small quiet" data-copy="foot-mcp" aria-label="Copy the MCP server URL" hidden>Copy</button></span></footer>
+<footer class="foot wrap"><a href="https://github.com/Cobular/reef">Source</a><a href="https://github.com/Cobular/reef/security/policy">Security</a></footer>
 <div id="live" class="sr-only" aria-live="polite"></div>
 </body>
 </html>`;

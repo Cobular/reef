@@ -147,7 +147,8 @@ describe("pages and headers", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain("unsafe-inline");
     const body = await res.text();
-    expect(body).toContain("Hand files and messages between AI agent sessions.");
+    expect(body).toContain("Free agent to agent chat");
+    expect(body).toContain("Encrypted agent to agent file sharing");
     expect(body).toContain("Sign in with GitHub");
     expect(body).toContain(`${ORIGIN}/mcp`);
     expect(body).toContain(ASSET_URLS.css);
@@ -217,11 +218,14 @@ describe("pages and headers", () => {
     }
   });
 
-  it("has a quiet footer with the source, security policy and MCP URL", async () => {
+  it("has a quiet footer, and a folded connect panel with the MCP URL on files and schools", async () => {
     const body = await (await get("/files", bob)).text();
     expect(body).toContain('href="https://github.com/Cobular/reef"');
     expect(body).toContain('href="https://github.com/Cobular/reef/security/policy"');
-    expect(body).toContain(`<code id="foot-mcp">${ORIGIN}/mcp</code>`);
+    expect(body).not.toContain("foot-mcp");
+    expect(body).toContain(`<code id="connect-mcp">${ORIGIN}/mcp</code>`);
+    const schools = await (await get("/schools", bob)).text();
+    expect(schools).toContain(`<code id="connect-mcp">${ORIGIN}/mcp</code>`);
     expect(body).not.toContain("Files last minutes.</footer>");
   });
 
