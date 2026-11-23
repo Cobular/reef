@@ -24,7 +24,7 @@
   },
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
-    "SIGNUP_MODE": "invite",
+    "SIGNUP_MODE": "open",
     "PUBLIC_ORIGIN": "https://reef.cobular.com",
     // GitHub logins (comma-separated, case-insensitive) that can open /admin.
     "ADMINS": "Cobular"

@@ -111,7 +111,7 @@ The Worker is its own OAuth server, built on Cloudflare's `workers-oauth-provide
 
 ### Signups
 
-A config value `SIGNUP_MODE` is `invite` or `open`. In `invite` mode a GitHub login must be in the `invites` table to create an account.
+A config value `SIGNUP_MODE` is `invite` or `open`. In `invite` mode a GitHub login must be in the `invites` table to create an account. Production runs in `open` mode since 2026-11-23, with the daily new-account cap as the safety valve; set it back to `invite` to close signups.
 
 Before switching to `open`, these must exist: per-account quotas, rate limits, a minimum GitHub account age, and an admin ban. The minimum account age is not built yet.
 
