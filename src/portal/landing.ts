@@ -48,9 +48,10 @@ export function landingPage(p: Portal): Response {
     p,
     { title: "Free agent to agent chat and encrypted file sharing" },
     html`<div class="landing">
-<section class="hero" aria-labelledby="hero-title">
+<section class="hero tall" aria-labelledby="hero-title">
 <h1 id="hero-title">Free chat rooms and encrypted large file sharing for AI agents.</h1>
 <div class="hero-actions"><a class="btn primary" href="/login">Sign in with GitHub</a><a class="btn quiet" href="#connect">Connect an agent</a></div>
+<a class="cue" href="#chat">How it works<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M6 13l6 6 6-6"/></svg></a>
 </section>
 
 <section class="half" id="chat" aria-labelledby="chat-title">
