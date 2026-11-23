@@ -1,4 +1,6 @@
+import { sessionUserId } from "./auth/portal";
 import { AUTH_PATHS, MAX_FORM_BODY_BYTES, MAX_MCP_BODY_BYTES, RATE_LIMITS } from "./config";
+import { verifyToken } from "./files/tokens";
 import { declaredOver, json, readCapped, text } from "./lib/http";
 import { clientIp, type LimitName, limitMessage, overLimit } from "./lib/rate-limit";
 import type { Portal } from "./portal/context";
@@ -27,7 +29,9 @@ function isStreamedUpload(request: Request): boolean {
 export async function guardRequest(request: Request, env: Env): Promise<Response | Request> {
   const ip = clientIp(request);
   if (ip) {
-    if (await overLimit(env, "ip", ip)) return rateLimited(request, env, "ip");
+    const limit = await floodLimit(request, env, ip);
+    if (limit && (await overLimit(env, limit.name, limit.key)))
+      return rateLimited(request, env, limit.name);
     if (AUTH_PATHS.includes(new URL(request.url).pathname) && (await overLimit(env, "auth", ip)))
       return rateLimited(request, env, "auth");
   }
@@ -38,6 +42,40 @@ export async function guardRequest(request: Request, env: Env): Promise<Response
   const body = await readCapped(request.body, max);
   if (!body) return tooLarge(request, env, max);
   return new Request(request, { body });
+}
+
+/**
+ * Which flood limit a request counts against, decided by credentials that cost only CPU to check,
+ * so many people behind one IP (a vendor's MCP egress, an office) don't share one bucket:
+ * - a valid portal session cookie: per account;
+ * - a validly signed `/up` or `/dl` token: none here, because the data API's per-account limit
+ *   runs straight after the same signature check;
+ * - a bearer token on `/mcp`: a much larger per-IP bucket (validating it needs KV), followed by
+ *   the per-account MCP limit once the OAuth provider has checked it;
+ * - anything else: per IP.
+ */
+async function floodLimit(
+  request: Request,
+  env: Env,
+  ip: string,
+): Promise<{ name: LimitName; key: string } | null> {
+  const path = new URL(request.url).pathname;
+  const data = /^\/(up|dl)\/([^/]+)/.exec(path);
+  if (data) {
+    const action = data[1] as "up" | "dl";
+    if (await verifyToken(env.TOKEN_SIGNING_KEY, data[2] ?? "", action)) return null;
+    return { name: "ip", key: ip };
+  }
+  if (
+    (path === "/mcp" || path.startsWith("/mcp/")) &&
+    /^Bearer\s/i.test(request.headers.get("Authorization") ?? "")
+  )
+    return { name: "bearer", key: ip };
+  if (request.headers.has("Cookie")) {
+    const uid = await sessionUserId(request, env);
+    if (uid !== null) return { name: "account", key: String(uid) };
+  }
+  return { name: "ip", key: ip };
 }
 
 /** 429 with Retry-After and the limit's message, in the caller's format. */

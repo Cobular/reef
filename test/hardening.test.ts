@@ -150,6 +150,51 @@ describe("per-IP flood guard", () => {
   });
 });
 
+describe("flood limits after sign-in", () => {
+  it("keys a signed-in portal request by account, not IP", async () => {
+    const ipOnly = denying("RL_IP");
+    const page = fromIp("/files", { headers: { Cookie: await sessionCookie(alice.userId) } });
+    expect((await call(worker, page, ipOnly.env)).status).toBe(200);
+    expect(ipOnly.keys).toEqual([]);
+
+    const { env: e, keys } = denying("RL_ACCOUNT");
+    const again = fromIp("/files", { headers: { Cookie: await sessionCookie(alice.userId) } });
+    const res = await call(worker, again, e);
+    expectRetryAfter(res);
+    expect(await res.text()).toContain("Too many requests from this account.");
+    expect(keys).toEqual([String(alice.userId)]);
+    // A forged cookie falls back to the per-IP limit.
+    const forged = fromIp("/files", { headers: { Cookie: `${SESSION_COOKIE}=x.y` } });
+    expectRetryAfter(await call(worker, forged, ipOnly.env));
+  });
+
+  it("puts bearer-token MCP requests in the larger per-IP bucket", async () => {
+    const ipOnly = denying("RL_IP");
+    const withBearer = () =>
+      fromIp("/mcp", {
+        method: "POST",
+        headers: { Authorization: "Bearer not-a-real-token", "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+    // Past the flood guard, the OAuth provider refuses the made-up token.
+    expect((await call(worker, withBearer(), ipOnly.env)).status).toBe(401);
+    expect(ipOnly.keys).toEqual([]);
+    const { env: e, keys } = denying("RL_BEARER");
+    expectRetryAfter(await call(worker, withBearer(), e));
+    expect(keys).toEqual([IP]);
+  });
+
+  it("skips the per-IP limit for a validly signed data token", async () => {
+    const up = await upload(10);
+    const { env: e, keys } = denying("RL_IP");
+    const dl = await issueToken(env.TOKEN_SIGNING_KEY, "dl", up.file.id, alice.userId, Date.now());
+    // Not 429: the per-IP limit is skipped (the file isn't uploaded yet, hence not 200).
+    expect((await call(worker, fromIp(`/dl/${dl}`), e)).status).not.toBe(429);
+    expect(keys).toEqual([]);
+    expectRetryAfter(await call(worker, fromIp("/dl/x.y"), e));
+  });
+});
+
 describe("per-IP sign-in limit", () => {
   it("covers the sign-in pages and OAuth endpoints only", async () => {
     const { env: e, keys } = denying("RL_AUTH");
