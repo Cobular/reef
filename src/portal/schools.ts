@@ -28,12 +28,17 @@ function memberFaces(school: SchoolListing): Raw {
   );
 }
 
+/** The description as one muted line (CSS truncates it); nothing when there is none. */
+function descriptionLine(school: SchoolListing): Raw | "" {
+  return school.description ? html`<p class="row-desc">${school.description}</p>` : "";
+}
+
 function inviteRow(p: SignedIn, school: SchoolListing): Raw {
   const base = `/schools/${school.id}`;
   return html`<li class="row">
 <div>
 <div class="row-title"><a href="${base}">${school.name}</a>${pill("pending")}</div>
-<div class="meta"><span>${school.createdBy ? html`From <span class="mono">${school.createdBy}</span>` : "Invitation"}</span><span>${kindText(school, p.user.userId)}</span>${memberFaces(school)}</div>
+${descriptionLine(school)}<div class="meta"><span>${school.createdBy ? html`From <span class="mono">${school.createdBy}</span>` : "Invitation"}</span><span>${kindText(school, p.user.userId)}</span>${memberFaces(school)}</div>
 </div>
 <div></div>
 <div class="row-actions">${postButton(`${base}/accept`, p.csrf, "Accept", "btn small primary")}${postButton(
@@ -56,7 +61,7 @@ function schoolRow(p: SignedIn, school: SchoolListing): Raw {
 <div class="row-title"><a href="/schools/${school.id}${school.unread > 0 ? "#new" : ""}">${school.name}</a>${unread}${
     school.paused ? pill("paused") : ""
   }</div>
-<div class="meta"><span>${kindText(school, p.user.userId)}</span>${memberFaces(school)}</div>
+${descriptionLine(school)}<div class="meta"><span>${kindText(school, p.user.userId)}</span>${memberFaces(school)}</div>
 </div>
 <div class="small muted">${
     school.lastMessageAt !== null
@@ -68,9 +73,10 @@ function schoolRow(p: SignedIn, school: SchoolListing): Raw {
 
 interface NewSchoolState {
   name?: string;
+  description?: string;
   kind?: string;
   logins?: string;
-  errors?: { name?: string; kind?: string; logins?: string; form?: string };
+  errors?: { name?: string; description?: string; kind?: string; logins?: string; form?: string };
 }
 
 const KINDS = [
@@ -96,6 +102,15 @@ ${e.form ? html`<p class="field-error">${e.form}</p>` : ""}
     e.name ? html` aria-invalid="true"` : ""
   }>
 ${fieldError("name-error", e.name ?? null)}
+</div>
+<div class="field">
+<label for="school-description">Description <span class="opt">(optional)</span></label>
+<textarea id="school-description" name="description" rows="3" maxlength="${String(SCHOOL_LIMITS.maxSchoolDescriptionLength)}" aria-describedby="description-hint description-error"${
+    e.description ? html` aria-invalid="true"` : ""
+  }>
+${state.description ?? ""}</textarea>
+<p class="hint" id="description-hint">What the school is for, so members and their agents can tell. Plain text.</p>
+${fieldError("description-error", e.description ?? null)}
 </div>
 <fieldset class="field">
 <legend>Who’s in it?</legend>
@@ -157,9 +172,10 @@ export async function createSchoolFromPortal(p: SignedIn): Promise<Response> {
   const form = await readForm(p.request);
   if (!form || !formCsrfOk(p, form)) return forbidden(p);
   const name = (form.get("name") ?? "").trim();
+  const description = form.get("description") ?? "";
   const kind = form.get("kind") ?? "";
   const loginsText = form.get("logins") ?? "";
-  const state: NewSchoolState = { name, kind, logins: loginsText };
+  const state: NewSchoolState = { name, description, kind, logins: loginsText };
   const fail = (errors: NonNullable<NewSchoolState["errors"]>, status = 400) =>
     schoolsPage(p, { ...state, errors }, status);
 
@@ -176,6 +192,7 @@ export async function createSchoolFromPortal(p: SignedIn): Promise<Response> {
       name,
       kind === "solo" ? "group" : kind,
       logins,
+      description,
     );
     const invited = created.invited.length > 0 ? ` Invited ${created.invited.join(", ")}.` : "";
     return seeOther(
@@ -187,6 +204,7 @@ export async function createSchoolFromPortal(p: SignedIn): Promise<Response> {
     if (!(error instanceof ReefError)) throw error;
     const m = error.message;
     if (m.startsWith("name")) return fail({ name: `The ${m}.` }, error.status);
+    if (m.startsWith("description")) return fail({ description: `The ${m}.` }, error.status);
     if (m.startsWith("Not Reef accounts") || m.includes("members") || m.includes("other account"))
       return fail({ logins: m }, error.status);
     return fail({ form: m }, error.status);

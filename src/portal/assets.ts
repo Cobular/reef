@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "1906e3191e";
+export const ASSET_VERSION = "7c7340566e";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -77,6 +77,8 @@ td .avatar{margin-right:6px}
 .row.link .row-title a:focus-visible::after{outline:2px solid var(--sea);outline-offset:-2px}
 .row+.row{border-top:1px solid var(--line)}
 .row-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.row-desc{margin:0 0 4px;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row>div:first-child{min-width:0}
 .row-title a{color:var(--ink);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
 .row-title a:hover{text-decoration:underline}
 .gone .row-title a{color:var(--muted)}
@@ -109,9 +111,10 @@ label,legend{display:block;font-weight:600;margin-bottom:6px;padding:0}
 .opt{font-weight:400;color:var(--muted)}
 .hint{color:var(--muted);font-size:13px;margin:6px 0 0}
 .field-error{color:var(--danger);font-size:13px;font-weight:500;margin:6px 0 0}
-input[type=text],input[type=number]{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px;transition:border-color .14s}
-input[type=text]:hover,input[type=number]:hover{border-color:var(--muted)}
-input:focus-visible{outline:2px solid var(--sea);outline-offset:0;border-color:var(--sea)}
+input[type=text],input[type=number],textarea{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px;transition:border-color .14s}
+textarea{display:block;resize:vertical;min-height:4.5em}
+input[type=text]:hover,input[type=number]:hover,textarea:hover{border-color:var(--muted)}
+input:focus-visible,textarea:focus-visible{outline:2px solid var(--sea);outline-offset:0;border-color:var(--sea)}
 [aria-invalid=true]{border-color:var(--danger)!important}
 input.short{max-width:10rem}
 .check{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:0 0 8px}
@@ -138,6 +141,7 @@ input.short{max-width:10rem}
 .kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0}
 .title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px}
 .title-row>h1{margin:0}
+.school-desc{margin:-12px 0 24px;max-width:48rem;color:var(--muted);white-space:pre-line;overflow-wrap:anywhere}
 .people{list-style:none;margin:0;padding:0}
 .people li{display:flex;align-items:center;gap:10px;padding:6px 0}
 .people form{margin-left:auto}
@@ -167,6 +171,18 @@ input.short{max-width:10rem}
 a.file-chip:hover{border-color:var(--sea)}
 .file-chip.gone{color:var(--muted)}
 .pager{display:flex;justify-content:center;padding:12px}
+.msg.person{background:var(--bg)}
+.msg:target{border-left-color:var(--coral)}
+.reply-link{margin-left:auto;color:var(--muted)}
+.reply-link:hover{color:var(--sea)}
+.msg-reply{margin:4px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.msg-reply a{color:var(--muted)}
+.reply-chip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 12px;margin:0 0 8px;padding:6px 12px;border:1px solid var(--line);border-left:3px solid var(--sea);border-radius:8px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.compose{border-top:1px solid var(--line);margin-top:8px;padding:16px 16px 0}
+.compose-foot{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 16px;margin-top:8px}
+.compose-foot .hint{margin:0;flex:1 1 14rem}
+.count{font-variant-numeric:tabular-nums;white-space:nowrap}
+.count.over{color:var(--danger);font-weight:600}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:10px 12px;border-top:1px solid var(--line)}
@@ -265,6 +281,21 @@ export const JS = `(() => {
     if (e.key !== "Escape") return;
     for (const d of $$("details.confirm[open]")) { d.open = false; $("summary", d).focus(); }
   });
+
+  // ---- school compose: byte counter, Ctrl/Cmd+Enter sends -----------------------------------
+  for (const ta of $$("textarea[data-max-bytes]")) {
+    const max = Number(ta.dataset.maxBytes), out = document.getElementById(ta.dataset.count);
+    const enc = new TextEncoder();
+    const count = () => {
+      const n = enc.encode(ta.value).length;
+      out.textContent = n.toLocaleString() + " of " + max.toLocaleString() + " bytes";
+      out.classList.toggle("over", n > max);
+    };
+    if (out) { out.hidden = false; count(); ta.addEventListener("input", count); }
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && ta.form) { e.preventDefault(); ta.form.requestSubmit(); }
+    });
+  }
 
   // ---- upload --------------------------------------------------------------------------------
   const form = $("#upload");

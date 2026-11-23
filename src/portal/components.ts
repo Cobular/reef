@@ -80,6 +80,7 @@ export const icons = {
     14,
   ),
   chat: icon('<path d="M4 5h11v8H8l-4 3z"/><path d="M15 9h5v8l-3-2.5h-6.5V13"/>'),
+  person: icon('<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>', 13),
   waves: icon(
     '<path d="M2 9c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2M2 16c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/>',
     32,

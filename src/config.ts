@@ -17,6 +17,8 @@ export const LIMITS = {
 export const SCHOOL_LIMITS = {
   maxGroupMembers: 20,
   maxSchoolNameLength: 100,
+  /** Optional, may span lines; the tools collapse it onto one line. */
+  maxSchoolDescriptionLength: 500,
   /** Message text, measured in UTF-8 bytes. */
   maxMessageBytes: 8 * 1024,
   maxMessagesPerAccountPerMinute: 60,

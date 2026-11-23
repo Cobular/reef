@@ -2,9 +2,15 @@ import type { SessionType } from "../config";
 
 export type SchoolKind = "pair" | "group";
 
+/** messages.session_type for a message a person wrote in the Reef portal, not a session. */
+export const PERSON_SENDER = "person";
+/** Who wrote a message: one of the agent session types, or a person in the portal. */
+export type SenderType = SessionType | typeof PERSON_SENDER;
+
 export interface SchoolRow {
   id: string;
   name: string;
+  description: string;
   kind: SchoolKind;
   paused: number;
   created_by: number;
@@ -33,14 +39,33 @@ export interface MessageRow {
   seq: number;
   sender_id: number;
   sender_login: string;
-  session_type: SessionType;
+  session_type: SenderType;
   product: string;
   label: string;
   text: string;
   /** JSON array of StoredAttachment. */
   attachments: string;
   created_at: number;
+  /** The seq of the message in the same school this one replies to. */
+  reply_to: number | null;
+  /** The replied-to message's sender, from a LEFT JOIN; null when it is gone or there is none. */
+  reply_sender_id: number | null;
+  reply_sender_login: string | null;
+  reply_session_type: SenderType | null;
+  reply_product: string | null;
+  reply_label: string | null;
 }
+
+/**
+ * Selects messages `m` with the sender's login and the replied-to message's sender. The parent
+ * join is on the messages primary key: one seek per message, inside the same query.
+ */
+const MESSAGE_SELECT = `SELECT m.*, u.login AS sender_login,
+    p.sender_id AS reply_sender_id, pu.login AS reply_sender_login,
+    p.session_type AS reply_session_type, p.product AS reply_product, p.label AS reply_label
+  FROM messages m JOIN users u ON u.id = m.sender_id
+  LEFT JOIN messages p ON p.school_id = m.school_id AND p.seq = m.reply_to
+  LEFT JOIN users pu ON pu.id = p.sender_id`;
 
 /** One attachment as stored in messages.attachments. `gone` is set when cleanup drops the key. */
 export interface StoredAttachment {
@@ -87,6 +112,37 @@ export function getMembership(
     .first<MembershipRow>();
 }
 
+/** One account's member row for a portal send, with its messages in the rate-limit window. */
+export interface PortalSendRow {
+  id: string;
+  name: string;
+  paused: number;
+  accepted: number;
+  recent: number;
+  /** 1 if the school holds a message with the replied-to seq (0 when not replying). */
+  reply_found: number;
+}
+
+export function getPortalSendContext(
+  db: D1Database,
+  schoolId: string,
+  userId: number,
+  recentSince: number,
+  replyTo: number | null = null,
+): Promise<PortalSendRow | null> {
+  return db
+    .prepare(
+      `SELECT sc.id, sc.name, sc.paused, sm.accepted,
+         (SELECT COUNT(*) FROM messages WHERE sender_id = ?2 AND created_at > ?3) AS recent,
+         EXISTS (SELECT 1 FROM messages WHERE school_id = sc.id AND seq = ?4) AS reply_found
+       FROM schools sc
+       JOIN school_members sm ON sm.school_id = sc.id AND sm.user_id = ?2
+       WHERE sc.id = ?1`,
+    )
+    .bind(schoolId, userId, recentSince, replyTo)
+    .first<PortalSendRow>();
+}
+
 export async function insertSchool(
   db: D1Database,
   school: SchoolRow,
@@ -95,11 +151,12 @@ export async function insertSchool(
   await db.batch([
     db
       .prepare(
-        "INSERT INTO schools (id, name, kind, paused, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO schools (id, name, description, kind, paused, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .bind(
         school.id,
         school.name,
+        school.description,
         school.kind,
         school.paused,
         school.created_by,
@@ -190,6 +247,17 @@ export async function updatePaused(db: D1Database, schoolId: string, paused: boo
     .run();
 }
 
+export async function updateSchoolDetails(
+  db: D1Database,
+  schoolId: string,
+  details: { name: string; description: string },
+) {
+  await db
+    .prepare("UPDATE schools SET name = ?, description = ? WHERE id = ?")
+    .bind(details.name, details.description, schoolId)
+    .run();
+}
+
 export interface ListedMembershipRow extends MembershipRow {
   created_by_login: string | null;
   last_message_at: number | null;
@@ -251,21 +319,26 @@ export async function listMemberships(
   };
 }
 
-/** Newest first, strictly before `beforeSeq`. */
+/**
+ * Newest first, strictly before `beforeSeq`. With `alsoSeq`, also returns that one message (null
+ * if the school has none with that seq) in the same round trip.
+ */
 export async function messagesBefore(
   db: D1Database,
   schoolId: string,
   beforeSeq: number,
   limit: number,
-): Promise<MessageRow[]> {
-  const result = await db
-    .prepare(
-      `SELECT m.*, u.login AS sender_login FROM messages m JOIN users u ON u.id = m.sender_id
-       WHERE m.school_id = ? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?`,
-    )
-    .bind(schoolId, beforeSeq, limit)
-    .all<MessageRow>();
-  return result.results;
+  alsoSeq: number | null = null,
+): Promise<{ messages: MessageRow[]; also: MessageRow | null }> {
+  const page = db
+    .prepare(`${MESSAGE_SELECT} WHERE m.school_id = ? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?`)
+    .bind(schoolId, beforeSeq, limit);
+  if (alsoSeq === null) return { messages: (await page.all<MessageRow>()).results, also: null };
+  const [messages, also] = await db.batch<MessageRow>([
+    page,
+    db.prepare(`${MESSAGE_SELECT} WHERE m.school_id = ? AND m.seq = ?`).bind(schoolId, alsoSeq),
+  ]);
+  return { messages: messages?.results ?? [], also: also?.results[0] ?? null };
 }
 
 // ---- sessions ------------------------------------------------------------------------------
@@ -273,6 +346,7 @@ export async function messagesBefore(
 export interface RoutedSchoolRow {
   id: string;
   name: string;
+  description: string;
   kind: SchoolKind;
   paused: number;
 }
@@ -302,7 +376,7 @@ export async function joinSession(
       .bind(candidateHandle, userId, type, product, label, now),
     db
       .prepare(
-        `SELECT sc.id, sc.name, sc.kind, sc.paused FROM school_members sm
+        `SELECT sc.id, sc.name, sc.description, sc.kind, sc.paused FROM school_members sm
          JOIN schools sc ON sc.id = sm.school_id
          WHERE sm.user_id = ?1 AND sm.accepted = 1 AND ${typeMatch("?2")}
          ORDER BY sc.name COLLATE NOCASE`,
@@ -384,6 +458,8 @@ export interface SessionSchoolRow {
   session_types: string | null;
   /** Messages this account sent in the rate-limit window. */
   recent: number;
+  /** 1 if the school holds a message with the replied-to seq (0 when not replying). */
+  reply_found: number;
 }
 
 function sessionSchool(
@@ -392,18 +468,20 @@ function sessionSchool(
   userId: number,
   schoolId: string,
   recentSince: number,
+  replyTo: number | null = null,
 ) {
   return db
     .prepare(
       `SELECT s.handle, s.type, s.product, s.label, sc.id AS school_id, sc.name, sc.paused,
          sm.accepted, sm.session_types,
-         (SELECT COUNT(*) FROM messages WHERE sender_id = s.user_id AND created_at > ?4) AS recent
+         (SELECT COUNT(*) FROM messages WHERE sender_id = s.user_id AND created_at > ?4) AS recent,
+         EXISTS (SELECT 1 FROM messages WHERE school_id = sc.id AND seq = ?5) AS reply_found
        FROM sessions s
        LEFT JOIN school_members sm ON sm.user_id = s.user_id AND sm.school_id = ?3
        LEFT JOIN schools sc ON sc.id = sm.school_id
        WHERE s.handle = ?1 AND s.user_id = ?2`,
     )
-    .bind(handle, userId, schoolId, recentSince);
+    .bind(handle, userId, schoolId, recentSince, replyTo);
 }
 
 export async function getSessionSchool(
@@ -413,10 +491,11 @@ export async function getSessionSchool(
   schoolId: string,
   now: number,
   recentSince: number,
+  replyTo: number | null = null,
 ): Promise<SessionSchoolRow | null> {
   const [, row] = await db.batch<SessionSchoolRow>([
     touchSession(db, handle, userId, now),
-    sessionSchool(db, handle, userId, schoolId, recentSince),
+    sessionSchool(db, handle, userId, schoolId, recentSince, replyTo),
   ]);
   return row?.results[0] ?? null;
 }
@@ -448,7 +527,7 @@ export async function readAfterPosition(
     sessionSchool(db, handle, userId, schoolId, now),
     db
       .prepare(
-        `SELECT m.*, u.login AS sender_login FROM messages m JOIN users u ON u.id = m.sender_id
+        `${MESSAGE_SELECT}
          WHERE m.school_id = ?1 AND m.seq > ${READ_POSITION} AND ${MAY_READ}
          ORDER BY m.seq LIMIT ?4`,
       )
@@ -487,18 +566,21 @@ export async function moveReadPosition(
 export interface NewMessage {
   schoolId: string;
   senderId: number;
-  sessionType: SessionType;
+  sessionType: SenderType;
   product: string;
   label: string;
   text: string;
   attachments: string;
   createdAt: number;
+  /** The seq of an existing message in the same school that this one replies to. */
+  replyTo: number | null;
 }
 
 /**
  * Inserts a message and returns its seq, or null if a guard failed: the school is paused, the
- * sender's member row is not accepted or does not include the session type, or the sender hit
- * the rate limit. The seq is allocated inside this single INSERT ... SELECT: one above the
+ * sender's member row is not accepted or (for a session) does not include the session type, the
+ * sender hit the rate limit, or the replied-to message is no longer in the school. A person's portal message skips the session-type check. The
+ * seq is allocated inside this single INSERT ... SELECT: one above the
  * highest of the newest seq and any read position (so a school emptied by retention never reuses
  * seqs that sessions have already read past),
  * which D1 runs atomically, so concurrent sends get unique, dense numbers.
@@ -512,14 +594,16 @@ export async function insertMessage(
   const row = await db
     .prepare(
       `INSERT INTO messages (school_id, seq, sender_id, session_type, product, label, text,
-         attachments, created_at)
+         attachments, created_at, reply_to)
        SELECT ?1, MAX(COALESCE((SELECT MAX(seq) FROM messages WHERE school_id = ?1), 0),
-         COALESCE((SELECT MAX(last_seq) FROM read_positions WHERE school_id = ?1), 0)) + 1,
-         ?2, ?3, ?4, ?5, ?6, ?7, ?8
+         COALESCE((SELECT last_seq FROM read_positions WHERE school_id = ?1
+           ORDER BY last_seq DESC LIMIT 1), 0)) + 1,
+         ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?11
        WHERE EXISTS (SELECT 1 FROM schools WHERE id = ?1 AND paused = 0)
          AND EXISTS (SELECT 1 FROM school_members sm WHERE sm.school_id = ?1 AND sm.user_id = ?2
-           AND sm.accepted = 1 AND ${typeMatch("?3")})
+           AND sm.accepted = 1${message.sessionType === PERSON_SENDER ? "" : ` AND ${typeMatch("?3")}`})
          AND (SELECT COUNT(*) FROM messages WHERE sender_id = ?2 AND created_at > ?9) < ?10
+         AND (?11 IS NULL OR EXISTS (SELECT 1 FROM messages WHERE school_id = ?1 AND seq = ?11))
        RETURNING seq`,
     )
     .bind(
@@ -533,6 +617,7 @@ export async function insertMessage(
       message.createdAt,
       recentSince,
       maxRecent,
+      message.replyTo,
     )
     .first<{ seq: number }>();
   return row?.seq ?? null;
