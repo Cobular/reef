@@ -28,6 +28,13 @@ export const SCHOOL_LIMITS = {
   sessionRetentionMs: 90 * 24 * 60 * 60 * 1000,
   defaultReadLimit: 50,
   maxReadLimit: 200,
+  /**
+   * Text per page of messages (school_read and the portal transcript), in UTF-16 code units: a page
+   * stops at the message limit or this budget, whichever comes first, and always holds at least one
+   * message. It bounds an agent's context use per call and the portal's escaping CPU (50 messages of
+   * 8 KB of markup characters took ~23 ms to escape; 64 Ki characters is ~4 ms).
+   */
+  maxPageChars: 64 * 1024,
   maxLabelLength: 100,
   maxProductLength: 64,
 } as const;

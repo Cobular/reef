@@ -596,7 +596,8 @@ export async function insertMessage(
       `INSERT INTO messages (school_id, seq, sender_id, session_type, product, label, text,
          attachments, created_at, reply_to)
        SELECT ?1, MAX(COALESCE((SELECT MAX(seq) FROM messages WHERE school_id = ?1), 0),
-         COALESCE((SELECT MAX(last_seq) FROM read_positions WHERE school_id = ?1), 0)) + 1,
+         COALESCE((SELECT last_seq FROM read_positions WHERE school_id = ?1
+           ORDER BY last_seq DESC LIMIT 1), 0)) + 1,
          ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?11
        WHERE EXISTS (SELECT 1 FROM schools WHERE id = ?1 AND paused = 0)
          AND EXISTS (SELECT 1 FROM school_members sm WHERE sm.school_id = ?1 AND sm.user_id = ?2

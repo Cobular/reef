@@ -68,7 +68,7 @@ const readInput = memoJsonSchema(
       .max(SCHOOL_LIMITS.maxReadLimit)
       .optional()
       .describe(
-        `Most messages to return. Default ${SCHOOL_LIMITS.defaultReadLimit}, at most ${SCHOOL_LIMITS.maxReadLimit}.`,
+        `Most messages to return. Default ${SCHOOL_LIMITS.defaultReadLimit}, at most ${SCHOOL_LIMITS.maxReadLimit}. Long messages return fewer per call (about 64 KB of text); the response says how many remain.`,
       ),
   }),
 );

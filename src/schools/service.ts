@@ -501,14 +501,25 @@ export async function transcript(
     limit + 1,
     options.replyTo ?? null,
   );
-  const page = rows.slice(0, limit);
+  const page = withinPageBudget(rows.slice(0, limit));
   const { accepted: _a, session_types: _t, ...school } = row;
   return {
     school,
     messages: page.map((m) => messageView(m, actor)),
-    nextBefore: rows.length > limit ? (page[page.length - 1]?.seq ?? null) : null,
+    nextBefore: rows.length > page.length ? (page[page.length - 1]?.seq ?? null) : null,
     replyTarget: also ? messageView(also, actor) : null,
   };
+}
+
+/** The longest prefix of `rows` within the page text budget, never fewer than one row. */
+function withinPageBudget<T extends { text: string; attachments: string }>(rows: T[]): T[] {
+  let used = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] as T;
+    used += row.text.length + row.attachments.length;
+    if (used > SCHOOL_LIMITS.maxPageChars && i > 0) return rows.slice(0, i);
+  }
+  return rows;
 }
 
 function readLimit(limit: number | undefined): number {
@@ -648,12 +659,13 @@ export async function readMessages(
   if (!ID_PATTERN.test(schoolId)) throw noSuchSchool(schoolId);
   const result = await repo.readAfterPosition(ctx.db, handle, actor, schoolId, count, ctx.now);
   const row = requireSessionSchool(result.context, handle, schoolId);
-  const last = result.messages[result.messages.length - 1];
+  const messages = withinPageBudget(result.messages);
+  const last = messages[messages.length - 1];
   if (last) await repo.moveReadPosition(ctx.db, handle, row.school_id, last.seq);
   return {
     school: { id: row.school_id, name: row.name ?? "", paused: row.paused === 1 },
-    messages: result.messages.map((m) => messageView(m, actor, row)),
-    remaining: Math.max(0, result.unread - result.messages.length),
+    messages: messages.map((m) => messageView(m, actor, row)),
+    remaining: Math.max(0, result.unread - messages.length),
   };
 }
 
