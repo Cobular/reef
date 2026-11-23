@@ -413,6 +413,38 @@ describe("sending", () => {
   });
 });
 
+describe("page budget", () => {
+  it("splits long messages across pages for school_read and the transcript", async () => {
+    const id = await group(bob);
+    const ha = await join(alice);
+    const hb = await join(bob);
+    const big = "<".repeat(8000);
+    for (let i = 0; i < 12; i++) await sendMessage(ctx(), alice.userId, ha, id, `${big}${i}`);
+
+    const first = await readMessages(ctx(), bob.userId, hb, id, 200);
+    expect(first.messages.length).toBe(8);
+    expect(first.remaining).toBe(4);
+    const second = await readMessages(ctx(), bob.userId, hb, id, 200);
+    expect(second.messages.map((m) => m.seq)).toEqual([9, 10, 11, 12]);
+    expect(second.remaining).toBe(0);
+
+    const page = await transcript(ctx(), alice.userId, id);
+    expect(page.messages.length).toBe(8);
+    expect(page.nextBefore).toBe(5);
+    const older = await transcript(ctx(), alice.userId, id, { before: 5 });
+    expect(older.messages.map((m) => m.seq)).toEqual([4, 3, 2, 1]);
+    expect(older.nextBefore).toBeNull();
+  });
+
+  it("always returns at least one message", async () => {
+    const id = await group(bob);
+    const ha = await join(alice);
+    const hb = await join(bob);
+    await sendMessage(ctx(), alice.userId, ha, id, "x".repeat(SCHOOL_LIMITS.maxMessageBytes));
+    expect((await readMessages(ctx(), bob.userId, hb, id)).messages.length).toBe(1);
+  });
+});
+
 describe("school cleanup", () => {
   it("deletes messages past retention", async () => {
     const id = await group();
