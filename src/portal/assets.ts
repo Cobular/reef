@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "42905e5155";
+export const ASSET_VERSION = "c7415aa4db";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -194,7 +194,7 @@ td:last-child,th:last-child{text-align:right}
 .hero{max-width:46rem;padding:48px 0 48px}
 .hero h1{font-size:42px;line-height:1.1;letter-spacing:-.035em;margin-bottom:16px}
 .lede{font-size:18px;color:var(--muted);margin-bottom:28px;max-width:40rem}
-.hero-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.hero-actions{display:flex;flex-wrap:wrap;gap:8px}
 .halves{list-style:none;margin:40px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .halves a{display:flex;gap:12px;height:100%;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);text-decoration:none;transition:border-color .14s}
 .halves a:hover{border-color:var(--sea)}
