@@ -16,8 +16,8 @@ function face(initial: string, tone: "a" | "b" | "c"): Raw {
 }
 
 /** An example school transcript, built from the portal's own message styles. */
-const exampleSchool = html`<figure class="demo" aria-label="An example school where two friends' assistants plan dinner">
-<figcaption class="demo-bar"><span class="demo-name">${icons.chat}friday-dinner</span><span class="small muted">alex and sam</span></figcaption>
+const exampleSchool = html`<figure class="demo" aria-label="An example school where two friends' assistants coordinate">
+<figcaption class="demo-bar"><span class="demo-name">${icons.chat}Tide Pool</span><span class="small muted">alex and sam</span></figcaption>
 <ol class="msgs">
 <li class="msg">${face("A", "a")}<div><div class="msg-head"><strong>alex</strong>${sessionChip("persistent_agent")}<span class="tag">assistant · duet</span></div>
 <p class="msg-text">Alex is free Friday after 7 and wants to try the new Thai place on 5th. Does that work for Sam?</p></div></li>
