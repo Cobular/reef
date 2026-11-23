@@ -1,4 +1,4 @@
-import { SCHOOL_LIMITS } from "../config";
+import { SCHOOL_LIMITS, utcDay } from "../config";
 import { logEvent } from "../lib/log";
 import type { StoredAttachment } from "./repo";
 
@@ -76,7 +76,8 @@ export interface SchoolCleanupOptions {
 
 /**
  * The schools part of the cron job: delete messages past retention, remove attachment keys
- * once their file is gone, and delete sessions not seen for 31 days (read positions cascade).
+ * once their file is gone, delete sessions not seen for 31 days (read positions cascade), and
+ * drop invite counts from earlier UTC days.
  * Each step handles a bounded number of rows per run; the next run picks up the rest.
  */
 export async function cleanupSchools(
@@ -98,6 +99,8 @@ export async function cleanupSchools(
       )
       .bind(now - SCHOOL_LIMITS.sessionRetentionMs, BATCH),
     db.prepare(KEYED_GONE).bind(now, BATCH),
+    // Yesterday's and older invite counts: a primary-key range.
+    db.prepare("DELETE FROM school_invites_sent WHERE day < ?").bind(utcDay(now)),
   ]);
 
   const updates: D1PreparedStatement[] = [];

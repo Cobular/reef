@@ -13,9 +13,27 @@ export const LIMITS = {
   maxFileNameLength: 255,
 } as const;
 
+/**
+ * New accounts created per UTC day while SIGNUP_MODE is open. Invited logins and existing
+ * accounts don't count against it (DESIGN.md "Signups").
+ */
+export const MAX_NEW_ACCOUNTS_PER_DAY = 50;
+
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The UTC day `now` falls in, as days since the epoch. */
+export function utcDay(now: number): number {
+  return Math.floor(now / DAY_MS);
+}
+
 /** School limits from DESIGN.md "Schools". */
 export const SCHOOL_LIMITS = {
   maxGroupMembers: 20,
+  /**
+   * School invitations one account may send per UTC day, across all schools (creating a school
+   * with invitees counts too). Counted in school_invites_sent.
+   */
+  maxInvitesPerAccountPerDay: 20,
   maxSchoolNameLength: 100,
   /** Optional, may span lines; the tools collapse it onto one line. */
   maxSchoolDescriptionLength: 500,

@@ -50,7 +50,7 @@ export function createWorker(deps: WorkerDeps) {
         case `GET ${PORTAL_CALLBACK_PATH}`:
           return finishLogin(request, env, deps.github);
         default:
-          return handlePortal(request, env, deps.github, partSize);
+          return handlePortal(request, env, deps.github, partSize, oauth);
       }
     },
   };

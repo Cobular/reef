@@ -1,0 +1,37 @@
+name: Report abuse
+description: Report a file, school message or account on Reef that breaks the terms.
+title: "Abuse report: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **This issue is public.** Never paste a file key, a handoff line, file contents, or anyone's private data here. Describe what you saw instead; the operator will follow up.
+
+        The operator reads every report and may delete content and ban accounts. See the [terms](https://reef.cobular.com/terms).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What's wrong?
+      options:
+        - A file
+        - A school message
+        - An account
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: subject
+    attributes:
+      label: File ID, school name, or GitHub login involved
+      description: A file ID is the short ID in its handoff line or portal address, never the key.
+      placeholder: e.g. k3fq9x2mz7w4hb6p, "Team chat", or octocat
+    validations:
+      required: false
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and when (with time zone). No keys, file contents or private data.
+    validations:
+      required: true

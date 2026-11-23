@@ -1,9 +1,11 @@
+import type { GrantRevoker } from "../account/service";
 import type { GitHubApi } from "../auth/github";
 import { logout, sessionUserId, startLogin } from "../auth/portal";
 import { rateLimited } from "../guard";
 import { redirect, safeNext, text } from "../lib/http";
 import { logError } from "../lib/log";
 import { overLimit } from "../lib/rate-limit";
+import { accountPage, deleteAccountFromPortal } from "./account";
 import { ADMIN_ACTIONS, type AdminAction, adminAction, adminPage } from "./admin";
 import { serveAsset, serveFaviconIco } from "./assets";
 import { formCsrfOk, type Portal, portalContext, readForm, type SignedIn } from "./context";
@@ -13,6 +15,7 @@ import { landingPage } from "./landing";
 import { errorScreen, forbidden, notFound } from "./layout";
 import { SCHOOL_ACTIONS, type SchoolAction, schoolAction, schoolPage } from "./school";
 import { createSchoolFromPortal, newSchoolPage, schoolsPage } from "./schools";
+import { termsPage } from "./terms";
 import { createBrowserUpload, uploadPage } from "./upload";
 
 const ID = "([a-z0-9]{1,64})";
@@ -23,17 +26,19 @@ const SCHOOL_ACTION = new RegExp(`^/schools/${ID}/([a-z]+)$`);
 const ADMIN_ACTION = /^\/admin\/([a-z]+\/[a-z]+)$/;
 
 /** Pages that need a session; anything else under these prefixes is still a 404 for them. */
-const SIGNED_IN_ONLY = /^\/(files|schools|admin)(\/|$)/;
+const SIGNED_IN_ONLY = /^\/(files|schools|admin|account)(\/|$)/;
 
 /**
- * Every people-facing route: the landing page, files, schools, admin, sign-in and sign-out,
- * and the static assets. OAuth, MCP and the data API are routed before this.
+ * Every people-facing route: the landing page, terms, files, schools, account, admin, sign-in
+ * and sign-out, and the static assets. OAuth, MCP and the data API are routed before this.
+ * `oauth` revokes grants when an account is deleted.
  */
 export async function handlePortal(
   request: Request,
   env: Env,
   github: GitHubApi,
   partSize: number,
+  oauth: GrantRevoker,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/static/")) {
@@ -51,6 +56,7 @@ export async function handlePortal(
       env,
       github,
       partSize,
+      oauth,
     );
     return new Response(null, {
       status: response.status,
@@ -66,7 +72,7 @@ export async function handlePortal(
   }
   const p = await portalContext(request, env, partSize);
   try {
-    return await route(p, github);
+    return await route(p, github, oauth);
   } catch (error) {
     logError("portal.failed", error, { path: url.pathname, method: request.method });
     return errorScreen(
@@ -78,7 +84,7 @@ export async function handlePortal(
   }
 }
 
-async function route(p: Portal, github: GitHubApi): Promise<Response> {
+async function route(p: Portal, github: GitHubApi, oauth: GrantRevoker): Promise<Response> {
   const { method } = p.request;
   const path = p.url.pathname;
 
@@ -98,10 +104,11 @@ async function route(p: Portal, github: GitHubApi): Promise<Response> {
     return logout();
   }
   if (path === "/portal" && method === "GET") return redirect("/files");
+  if (path === "/terms") return method === "GET" ? termsPage(p) : notFound(p);
 
   if (!SIGNED_IN_ONLY.test(path)) return notFound(p);
   if (!p.user || !p.csrf) return signInFirst(p);
-  return signedIn(p as SignedIn);
+  return signedIn(p as SignedIn, oauth);
 }
 
 /** Where a signed-out visitor goes: sign in, then come back to the page (not to a POST). */
@@ -124,7 +131,7 @@ function wantsJson(request: Request): boolean {
   return (request.headers.get("Accept") ?? "").includes("application/json");
 }
 
-async function signedIn(p: SignedIn): Promise<Response> {
+async function signedIn(p: SignedIn, oauth: GrantRevoker): Promise<Response> {
   const { method } = p.request;
   const path = p.url.pathname;
   const get = method === "GET";
@@ -156,6 +163,9 @@ async function signedIn(p: SignedIn): Promise<Response> {
     const action = schoolPost[2] as SchoolAction;
     if (SCHOOL_ACTIONS.includes(action)) return schoolAction(p, schoolPost[1] as string, action);
   }
+
+  if (path === "/account" && get) return accountPage(p);
+  if (path === "/account/delete" && post) return deleteAccountFromPortal(p, oauth);
 
   // Not admins get the same 404 as any unknown page.
   if (p.admin) {

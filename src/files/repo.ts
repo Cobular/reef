@@ -58,6 +58,29 @@ export async function insertUser(db: D1Database, id: number, login: string, now:
     .run();
 }
 
+/**
+ * Inserts the account only if fewer than `cap` accounts were created since `since`, in one
+ * statement so two sign-ins at once can't both take the last place. The count stops at `cap`
+ * rows of the users_created index. Returns false when the day is full.
+ */
+export async function insertUserCapped(
+  db: D1Database,
+  id: number,
+  login: string,
+  now: number,
+  since: number,
+  cap: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `INSERT INTO users (id, login, created_at) SELECT ?1, ?2, ?3
+       WHERE (SELECT COUNT(*) FROM (SELECT 1 FROM users WHERE created_at >= ?4 LIMIT ?5)) < ?5`,
+    )
+    .bind(id, login, now, since, cap)
+    .run();
+  return result.meta.changes > 0;
+}
+
 export async function updateUserLogin(db: D1Database, id: number, login: string) {
   await db.prepare("UPDATE users SET login = ? WHERE id = ?").bind(login, id).run();
 }
