@@ -35,8 +35,9 @@ if (!secret) {
 
 // Same format as src/auth/signed.ts: base64url(JSON) + "." + base64url(HMAC-SHA256(body)).
 const days = 7;
+const now = Date.now();
 const body = Buffer.from(
-  JSON.stringify({ uid: userId, p: "session", exp: Date.now() + days * 86_400_000 }),
+  JSON.stringify({ uid: userId, iat: now, p: "session", exp: now + days * 86_400_000 }),
 ).toString("base64url");
 const mac = createHmac("sha256", secret).update(body).digest("base64url");
 const value = `${body}.${mac}`;

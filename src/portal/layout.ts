@@ -28,7 +28,7 @@ function header(p: Portal, section: Section): Raw {
           section === "schools",
         )}${p.admin ? navLink("/admin", "Admin", section === "admin") : ""}</nav>
 <div class="me"><a class="me-link" href="/account" title="Your account"${section === "account" ? html` aria-current="page"` : ""}>${avatar({ id: user.userId, login: user.login })}<span class="me-login mono">${user.login}</span></a>
-<form method="post" action="/logout">${csrfField(p.csrf)}<button type="submit" class="btn small quiet">Sign out</button></form></div>`
+<form method="post" action="/logout">${csrfField(p.csrf)}<button type="submit" class="btn small quiet" title="Signs this account out in every browser">Sign out</button></form></div>`
       : html`<div class="me"><a class="btn small" href="/login">Sign in</a></div>`;
   return html`<header class="top"><div class="wrap top-in">
 <a class="brand" href="/">${waveMark}<span>Reef</span></a>

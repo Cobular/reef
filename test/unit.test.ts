@@ -5,8 +5,10 @@ import { signValue, verifyValue } from "../src/auth/signed";
 import {
   downloadCommand,
   fileNameProblem,
+  handoffLine,
   multipartPython,
   multipartScript,
+  quoted,
   shellQuote,
   uploadCommand,
 } from "../src/files/commands";
@@ -98,16 +100,31 @@ describe("commands", () => {
     expect(cmd).toBe(
       `curl -sS --fail-with-body -T 'a'\\''; rm -rf ~ #' -H 'X-Key: KEY=' 'https://r.example/up/tok'`,
     );
-    expect(downloadCommand("https://r.example", "tok", "x.txt")).toBe(
-      `curl -sSf -H 'X-Key: <key>' -o 'x.txt' 'https://r.example/dl/tok'`,
+    expect(downloadCommand("https://r.example", "tok", "f1", "x.txt")).toBe(
+      `mkdir -p 'reef-f1' && curl -sSf -H 'X-Key: <key>' -o 'reef-f1/x.txt' 'https://r.example/dl/tok'`,
+    );
+    expect(downloadCommand("https://r.example", "tok", "f1", ".bashrc")).toContain(
+      `-o 'reef-f1/_bashrc'`,
     );
   });
 
   it("rejects names that are paths or carry control characters", () => {
     expect(fileNameProblem("report.pdf")).toBeNull();
-    for (const bad of ["", ".", "..", "a/b", "a\\b", "a\nb", " a", "x".repeat(256)]) {
-      expect(fileNameProblem(bad)).not.toBeNull();
+    expect(fileNameProblem("résumé 2026.pdf")).toBeNull();
+    expect(fileNameProblem("👩\u200d💻 notes.md")).toBeNull();
+    const bad = ["", ".", "..", "a/b", "a\\b", "a\nb", " a", "x".repeat(256)];
+    bad.push("a\u202eb", "a\u200bb", "a\u2028b", "a\u2029b", "a\u0085b", "a\ufeffb");
+    for (const name of bad) {
+      expect(fileNameProblem(name)).not.toBeNull();
     }
+  });
+
+  it("quotes names in tool text so they stay on one line and read as data", () => {
+    expect(quoted(`a "b"`)).toBe(`"a \\"b\\""`);
+    expect(quoted("a\u2028b\u202ec\nd")).toBe(`"a\\u2028b\\u202ec\\nd"`);
+    expect(handoffLine("f1", "K=", `x" key=y`, Date.UTC(2026, 0, 2, 3, 4, 5))).toBe(
+      `Reef handoff: id=f1 key=K= name="x\\" key=y" expires=2026-01-02T03:04:05Z`,
+    );
   });
 
   it("cuts parts on the configured part size and checks the file size first", () => {

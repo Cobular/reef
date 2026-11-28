@@ -1,7 +1,8 @@
 import { DAY_MS, SCHOOL_LIMITS, SESSION_TYPES, type SessionType, utcDay } from "../config";
+import { quoted } from "../files/commands";
 import { isValidKey } from "../files/key";
-import { findUsersByLogins, type UserRow } from "../files/repo";
-import { ReefError, uniqueLogins } from "../files/service";
+import type { UserRow } from "../files/repo";
+import { accountsByLogin, ReefError, uniqueLogins } from "../files/service";
 import { utf8 } from "../lib/base64";
 import { randomId } from "../lib/crypto";
 import { logEvent } from "../lib/log";
@@ -31,7 +32,8 @@ export function schoolsContext(env: Env, now = Date.now()): SchoolsContext {
 }
 
 const ID_PATTERN = /^[a-z0-9]{1,64}$/;
-const CONTROL_CHAR = /\p{Cc}/u;
+/** Control, format (bidi, zero-width) and line/paragraph separator characters. */
+const CONTROL_CHAR = /[\p{Cc}\p{Zl}\p{Zp}]|(?!\u200D)\p{Cf}/u;
 const RATE_WINDOW_MS = 60_000;
 const HANDLE_LENGTH = 24;
 
@@ -70,12 +72,15 @@ function textField(field: string, value: string, max: number): string {
   if (trimmed.length < 1 || trimmed.length > max)
     throw new ReefError(400, `${field} must be 1 to ${max} characters`);
   if (CONTROL_CHAR.test(trimmed))
-    throw new ReefError(400, `${field} must be one line without control characters`);
+    throw new ReefError(
+      400,
+      `${field} must be one line without control or invisible formatting characters`,
+    );
   return trimmed;
 }
 
-/** Control characters other than line feed and tab. */
-const CONTROL_CHAR_BUT_LINES = /[^\P{Cc}\n\t]/u;
+/** CONTROL_CHAR, except line feed and tab. */
+const CONTROL_CHAR_BUT_LINES = /[^\P{Cc}\n\t]|[\p{Zl}\p{Zp}]|(?!\u200D)\p{Cf}/u;
 
 /** A school description: trimmed, may be empty, may span lines (stored with \n only). */
 function descriptionField(value: string): string {
@@ -84,7 +89,10 @@ function descriptionField(value: string): string {
   if (trimmed.length > max)
     throw new ReefError(400, `description must be at most ${max} characters`);
   if (CONTROL_CHAR_BUT_LINES.test(trimmed))
-    throw new ReefError(400, "description must not contain control characters");
+    throw new ReefError(
+      400,
+      "description must not contain control or invisible formatting characters",
+    );
   return trimmed;
 }
 
@@ -110,7 +118,7 @@ async function resolveInvitees(
   logins: string[],
 ): Promise<UserRow[]> {
   const wanted = uniqueLogins(logins);
-  const users = (await findUsersByLogins(ctx.db, wanted)).filter((u) => u.banned === 0);
+  const users = await accountsByLogin(ctx.db, wanted);
   const found = new Set(users.map((u) => u.login.toLowerCase()));
   const missing = wanted.filter((l) => !found.has(l.toLowerCase()));
   if (missing.length > 0)
@@ -857,7 +865,7 @@ async function storedAttachments(
     if (missing.length > 0)
       throw new ReefError(
         403,
-        `Not every member of school ${schoolRef({ id: school.school_id, name: school.name })} can fetch file ${file.id} (${file.name}). Not on its share list: ${missing.join(", ")}. The file's owner can add them with share_file; then send again.`,
+        `Not every member of school ${schoolRef({ id: school.school_id, name: school.name })} can fetch file ${file.id} (${quoted(file.name)}). Not on its share list: ${missing.join(", ")}. The file's owner can add them with share_file; then send again.`,
       );
     return a.key === undefined
       ? { file_id: file.id, name: file.name }
