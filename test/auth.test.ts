@@ -1,12 +1,13 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { pkceChallenge } from "../src/auth/github";
-import { MAX_NEW_ACCOUNTS_PER_DAY } from "../src/config";
-import { csrfToken } from "../src/portal/csrf";
+import { signValue } from "../src/auth/signed";
+import { MAX_NEW_ACCOUNTS_PER_DAY, SESSION_COOKIE } from "../src/config";
 import {
   addUser,
   call,
   ORIGIN,
+  portalSessionFor,
   readRpc,
   resetDb,
   rpcRequest,
@@ -84,6 +85,12 @@ async function portalLogin(code: string, workerEnv = testEnv(), next?: string) {
   return { jar, back, github };
 }
 
+/** The form token a signed-in page carries for this browser's session. */
+async function formToken(jar: Jar): Promise<string> {
+  const page = await (await call(worker, req("/account", jar))).text();
+  return /name="csrf" value="([^"]+)"/.exec(page)?.[1] ?? "";
+}
+
 describe("portal sign-in", () => {
   it("signs in an invited account (login matched case-insensitively) and sets a session", async () => {
     const { jar, back, github } = await portalLogin("alice");
@@ -144,6 +151,18 @@ describe("portal sign-in", () => {
     expect(user?.login).toBe("alice-new");
   });
 
+  it("refuses a session cookie without an issue time, or issued before the account existed", async () => {
+    await addUser(7, "erin");
+    const page = (cookie: string) =>
+      call(worker, new Request(`${ORIGIN}/files`, { headers: { Cookie: cookie } }));
+    expect((await page((await portalSessionFor(7)).cookie)).status).toBe(200);
+    const noIat = await signValue(env.COOKIE_SECRET, "session", { uid: 7 }, Date.now() + 60_000);
+    expect((await page(`${SESSION_COOKIE}=${noIat}`)).status).toBe(303);
+    // A cookie from an account that was deleted and signed up again with the same GitHub ID.
+    const old = await portalSessionFor(7, Date.now() - 60_000);
+    expect((await page(old.cookie)).status).toBe(303);
+  });
+
   it("returns to the page that asked for sign-in, and only to a local path", async () => {
     const asked = await call(worker, req("/schools"));
     expect(asked.headers.get("Location")).toBe("/login?next=%2Fschools");
@@ -155,12 +174,15 @@ describe("portal sign-in", () => {
     }
   });
 
-  it("signs out with the form token", async () => {
+  it("signs out with the form token, everywhere", async () => {
     const { jar } = await portalLogin("alice");
+    const { jar: otherBrowser } = await portalLogin("alice");
     const form = { "Content-Type": "application/x-www-form-urlencoded" };
     const forged = await call(worker, req("/logout", jar, { method: "POST", headers: form }));
     expect(forged.status).toBe(403);
-    const csrf = await csrfToken(testEnv(), 101);
+    const csrf = await formToken(jar);
+    // Each session has its own form token.
+    expect(await formToken(otherBrowser)).not.toBe(csrf);
     const out = await call(
       worker,
       req("/logout", jar, { method: "POST", headers: form, body: `csrf=${csrf}` }),
@@ -169,6 +191,8 @@ describe("portal sign-in", () => {
     jar.take(out);
     expect(jar.has("__Host-reef-session")).toBe(false);
     expect((await call(worker, req("/files", jar))).status).toBe(303);
+    expect((await call(worker, req("/files", otherBrowser))).status).toBe(303);
+    expect((await portalLogin("alice")).back.status).toBe(302);
   });
 
   it("serves the landing page and 404s elsewhere", async () => {
@@ -218,6 +242,8 @@ async function authorize(clientId: string, verifier: string) {
   expect(handle).not.toBe("");
   expect(page).toContain("Test Agent");
   expect(page).toContain("client.example");
+  expect(page).toContain("read and send");
+  expect(page).toContain("messages in your Reef schools");
   return { jar, handle };
 }
 
@@ -382,15 +408,19 @@ const DAY = 86_400_000;
 
 /** `count` accounts created at `at`, with IDs from `from`. */
 async function seedAccounts(count: number, at: number, from = 1000) {
-  await env.DB.batch(
-    Array.from({ length: count }, (_, i) =>
+  await env.DB.batch([
+    ...Array.from({ length: count }, (_, i) =>
       env.DB.prepare("INSERT INTO users (id, login, created_at) VALUES (?, ?, ?)").bind(
         from + i,
         `seed${from + i}`,
         at,
       ),
     ),
-  );
+    env.DB.prepare(
+      `INSERT INTO signups_daily (day, created) VALUES (?, ?)
+       ON CONFLICT (day) DO UPDATE SET created = created + excluded.created`,
+    ).bind(Math.floor(at / DAY), count),
+  ]);
 }
 
 describe("daily cap on new accounts", () => {
@@ -429,6 +459,13 @@ describe("daily cap on new accounts", () => {
     const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>();
     expect(count?.n).toBe(MAX_NEW_ACCOUNTS_PER_DAY + 2);
   });
+
+  it("keeps counting an account created today after it is deleted", async () => {
+    await seedAccounts(MAX_NEW_ACCOUNTS_PER_DAY - 1, Date.now());
+    expect((await portalLogin("mallory", open)).back.status).toBe(302);
+    await env.DB.prepare("DELETE FROM users").run();
+    expect((await portalLogin("mallory", open)).back.status).toBe(503);
+  });
 });
 
 describe("account deletion and OAuth", () => {
@@ -444,7 +481,7 @@ describe("account deletion and OAuth", () => {
       req("/account/delete", jar, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN },
-        body: new URLSearchParams({ csrf: await csrfToken(testEnv(), 101), confirm: "ALICE" }),
+        body: new URLSearchParams({ csrf: await formToken(jar), confirm: "ALICE" }),
       }),
     );
     expect(deleted.status).toBe(200);

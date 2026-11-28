@@ -136,7 +136,7 @@ export async function adminAction(p: SignedIn, action: AdminAction): Promise<Res
         return done("Choose an account from the list.", "error");
       const ban = action === "users/ban";
       if (ban && id === p.user.userId) return done("You can’t ban your own account.", "error");
-      const user = await setBanned(db, id, ban);
+      const user = await setBanned(db, id, ban, p.now);
       if (!user) return done("There is no account with that ID.", "error");
       logEvent(ban ? "admin.banned" : "admin.unbanned", { user: p.user.userId, target: id });
       return done(

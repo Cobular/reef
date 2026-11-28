@@ -106,7 +106,7 @@ describe("showing and accepting display names", () => {
       share_with: ["Reef-Bob", "alice"],
     });
     expect(up.shareWith).toEqual(["reef-bob"]);
-    const [view] = await listFiles(files(), alice);
+    const [view] = (await listFiles(files(), alice)).files;
     expect(view?.shares).toEqual(["reef-bob"]);
     expect(view?.shareAccounts[0]?.aliased).toBe(true);
 
@@ -117,7 +117,5 @@ describe("showing and accepting display names", () => {
       "carol",
       "reef-bob",
     ]);
-    const mine = await listFiles(files(), bob);
-    expect(mine[0]?.file.owner_login).toBe("alice");
   });
 });

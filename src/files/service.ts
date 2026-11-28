@@ -1,4 +1,4 @@
-import { LIMITS, publicOrigin, ROW_RETENTION_MS } from "../config";
+import { LIMITS, publicOrigin, ROW_RETENTION_MS, UNSTARTED_UPLOAD_MS, utcDay } from "../config";
 import { randomId } from "../lib/crypto";
 import { logEvent } from "../lib/log";
 import {
@@ -11,23 +11,26 @@ import {
 } from "./commands";
 import { generateKey, parseKey } from "./key";
 import {
+  AmbiguousLoginError,
   canAccess,
   type FileRow,
   fileWithShares,
   findUsersByNames,
   getFile,
   getUser,
-  insertFile,
+  insertFileCapped,
   type ListedFile,
   listFilesFor,
   markDeleted,
+  pendingUploads,
   deleteParts as removeParts,
   residentBytes,
   serviceResidentBytes,
   setShares,
   shareLogins,
   shareUserIds,
-  uploadsSince,
+  type UploadCaps,
+  uploadsOnDay,
 } from "./repo";
 import { Storage } from "./storage";
 import { issueToken } from "./tokens";
@@ -92,15 +95,12 @@ export function uniqueLogins(logins: string[]): string[] {
 }
 
 /**
- * Resolves account names (GitHub logins or display names) to accounts other than the caller;
- * refuses any that are not existing, active accounts. Each account appears once.
+ * Resolves account names (GitHub logins or display names) to active accounts other than the
+ * caller; refuses any that are not. Each account appears once.
  */
 async function resolveAccounts(db: D1Database, caller: Caller, names: string[]) {
-  const found = await findUsersByNames(db, names);
-  const missing = names.filter((n) => {
-    const user = found.get(n.toLowerCase());
-    return user?.banned !== 0;
-  });
+  const found = await accountsByName(db, names);
+  const missing = names.filter((n) => !found.has(n.toLowerCase()));
   if (missing.length > 0) {
     throw new ReefError(
       400,
@@ -110,6 +110,47 @@ async function resolveAccounts(db: D1Database, caller: Caller, names: string[]) 
   const byId = new Map([...found.values()].map((u) => [u.id, u]));
   byId.delete(caller.userId);
   return [...byId.values()];
+}
+
+/** findUsersByNames, with a login held by two accounts refused as a ReefError. */
+export async function accountsByName(db: D1Database, names: string[], includeBanned = false) {
+  try {
+    return await findUsersByNames(db, names, includeBanned);
+  } catch (error) {
+    if (error instanceof AmbiguousLoginError)
+      throw new ReefError(
+        409,
+        `More than one Reef account has had the login ${error.logins.join(", ")}: someone renamed on GitHub and another person took the name. Ask the person you mean to sign in to Reef again (that refreshes their login), then retry.`,
+      );
+    throw error;
+  }
+}
+
+/** The refusal for the first upload cap this upload would break, or null if it fits. */
+async function capProblem(
+  db: D1Database,
+  ownerId: number,
+  size: number,
+  caps: UploadCaps,
+): Promise<ReefError | null> {
+  if ((await uploadsOnDay(db, ownerId, caps.day)) >= caps.maxPerDay)
+    return new ReefError(
+      429,
+      `Upload limit reached: ${caps.maxPerDay} uploads per account per UTC day. Try again after 00:00 UTC.`,
+    );
+  if ((await pendingUploads(db, ownerId)) >= caps.maxPending)
+    return new ReefError(
+      429,
+      `You already have ${caps.maxPending} uploads in progress. Finish or delete one first; an upload that never starts is cleared after ${UNSTARTED_UPLOAD_MS / 60_000} minutes.`,
+    );
+  if ((await residentBytes(db, ownerId)) + size > caps.maxAccountBytes)
+    return new ReefError(
+      413,
+      "Account storage full: your files would exceed 10 GiB. Delete a file or wait for one to expire.",
+    );
+  if ((await serviceResidentBytes(db)) + size > caps.maxServiceBytes)
+    return new ReefError(413, "Reef is full right now. Try again in a few minutes.");
+  return null;
 }
 
 export async function createUpload(
@@ -139,19 +180,17 @@ export async function createUpload(
   if (shares.length > LIMITS.maxShareList)
     throw new ReefError(400, `A share list holds at most ${LIMITS.maxShareList} accounts`);
 
-  const dayAgo = ctx.now - 24 * 60 * 60 * 1000;
-  if ((await uploadsSince(db, caller.userId, dayAgo)) >= LIMITS.maxUploadsPerAccountPerDay)
-    throw new ReefError(
-      429,
-      `Upload limit reached: ${LIMITS.maxUploadsPerAccountPerDay} uploads per account per 24 hours.`,
-    );
-  if ((await residentBytes(db, caller.userId)) + input.size > LIMITS.maxResidentBytesPerAccount)
-    throw new ReefError(
-      413,
-      "Account storage full: your files would exceed 10 GiB. Delete a file or wait for one to expire.",
-    );
-  if ((await serviceResidentBytes(db)) + input.size > LIMITS.maxResidentBytesService)
-    throw new ReefError(413, "Reef is full right now. Try again in a few minutes.");
+  const caps: UploadCaps = {
+    day: utcDay(ctx.now),
+    maxPerDay: LIMITS.maxUploadsPerAccountPerDay,
+    maxPending: LIMITS.maxPendingUploadsPerAccount,
+    maxAccountBytes: LIMITS.maxResidentBytesPerAccount,
+    maxServiceBytes: LIMITS.maxResidentBytesService,
+  };
+  // A cheap first look, so the common refusal doesn't start a multipart upload; the insert
+  // below checks again atomically.
+  const early = await capProblem(db, caller.userId, input.size, caps);
+  if (early) throw early;
 
   const id = randomId();
   const multipart = input.size > ctx.partSize;
@@ -169,11 +208,19 @@ export async function createUpload(
     download_limit: limit,
     download_count: 0,
   };
-  await insertFile(
+  const inserted = await insertFileCapped(
     db,
     file,
     shares.map((u) => u.id),
+    caps,
   );
+  if (!inserted) {
+    if (uploadId) await ctx.storage.abortMultipart(id, uploadId);
+    throw (
+      (await capProblem(db, caller.userId, input.size, caps)) ??
+      new ReefError(429, "Another upload took the space at the same moment. Try again.")
+    );
+  }
   const origin = publicOrigin(ctx.env);
   const token = await issueToken(ctx.env.TOKEN_SIGNING_KEY, "up", id, caller.userId, ctx.now);
   const parts = multipart ? Math.ceil(input.size / ctx.partSize) : 1;
@@ -219,6 +266,8 @@ export async function assertDownloadable(
 
 export interface DownloadGrant {
   file: FileRow;
+  /** The owner's login, or null when the caller owns the file. */
+  otherOwner: string | null;
   command: string;
   expiresAt: number;
   downloadsLeft: number | null;
@@ -232,9 +281,14 @@ export async function getDownload(
   const file = await accessibleFile(ctx, caller, fileId);
   const expiresAt = await assertDownloadable(ctx, file);
   const token = await issueToken(ctx.env.TOKEN_SIGNING_KEY, "dl", file.id, caller.userId, ctx.now);
+  const otherOwner =
+    file.owner_id === caller.userId
+      ? null
+      : ((await getUser(ctx.env.DB, file.owner_id))?.login ?? "a deleted account");
   return {
     file,
-    command: downloadCommand(publicOrigin(ctx.env), token, file.name),
+    otherOwner,
+    command: downloadCommand(publicOrigin(ctx.env), token, file.id, file.name),
     expiresAt,
     downloadsLeft: file.download_limit === null ? null : file.download_limit - file.download_count,
   };
@@ -283,7 +337,17 @@ function fileView(file: ListedFile, accounts: Account[], now: number): ListedFil
   };
 }
 
-export async function listFiles(ctx: FilesContext, caller: Caller): Promise<ListedFileView[]> {
+export interface FileListing {
+  /** Own files, and files from accounts the caller shares an accepted school with. */
+  files: ListedFileView[];
+  /**
+   * Live files shared by accounts the caller shares no school with. Kept apart: their names are
+   * chosen by someone the caller hasn't agreed to hear from.
+   */
+  unknown: ListedFileView[];
+}
+
+export async function listFiles(ctx: FilesContext, caller: Caller): Promise<FileListing> {
   const { files, shares } = await listFilesFor(
     ctx.env.DB,
     caller.userId,
@@ -295,7 +359,14 @@ export async function listFiles(ctx: FilesContext, caller: Caller): Promise<List
     list.push({ id: s.user_id, login: s.login, aliased: s.aliased === 1 });
     byFile.set(s.file_id, list);
   }
-  return files.map((file) => fileView(file, byFile.get(file.id) ?? [], ctx.now));
+  const listing: FileListing = { files: [], unknown: [] };
+  for (const file of files) {
+    const { known, ...row } = file;
+    const view = fileView(row, byFile.get(file.id) ?? [], ctx.now);
+    if (known) listing.files.push(view);
+    else if (view.status !== "gone") listing.unknown.push(view);
+  }
+  return listing;
 }
 
 /**
@@ -345,7 +416,7 @@ export async function shareFile(
   if (file.state === "deleted") throw new ReefError(410, "The file has expired or been deleted.");
   const db = ctx.env.DB;
   const toAdd = await resolveAccounts(db, caller, uniqueLogins(add));
-  const toRemove = await findUsersByNames(db, uniqueLogins(remove));
+  const toRemove = await accountsByName(db, uniqueLogins(remove), true);
   const removeIds = new Set([...toRemove.values()].map((u) => u.id));
   const current = new Set(await shareUserIds(db, file.id));
   for (const id of removeIds) current.delete(id);

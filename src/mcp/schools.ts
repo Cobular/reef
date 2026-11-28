@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { SCHOOL_LIMITS, SESSION_TYPES } from "../config";
-import { utc } from "../files/commands";
+import { quoted, utc } from "../files/commands";
 import type { Caller } from "../files/service";
 import { randomId } from "../lib/crypto";
 import { logError } from "../lib/log";
@@ -118,10 +118,6 @@ const sendInput = memoJsonSchema(
   }),
 );
 
-function quoted(value: string): string {
-  return JSON.stringify(value);
-}
-
 /**
  * A member-written description as one quoted line: line breaks and other whitespace collapse to
  * single spaces, so it cannot fake extra list lines, and quoting keeps it delimited as data.
@@ -152,7 +148,7 @@ function senderLine(m: MessageView): string {
 }
 
 function attachmentLine(a: MessageView["attachments"][number]): string {
-  const file = `file ${a.fileId}${a.name ? ` (${a.name})` : ""}`;
+  const file = `file ${a.fileId}${a.name ? ` (${quoted(a.name)})` : ""}`;
   if (a.gone) return `- ${file}: expired or deleted; its key was removed.`;
   if (a.key) return `- ${file}, key=${a.key}. Fetch it with get_download and this key.`;
   return `- ${file}, no key attached. The key must reach you another way.`;

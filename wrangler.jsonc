@@ -26,8 +26,9 @@
   "vars": {
     "SIGNUP_MODE": "open",
     "PUBLIC_ORIGIN": "https://reef.cobular.com",
-    // GitHub logins (comma-separated, case-insensitive) that can open /admin.
-    "ADMINS": "Cobular"
+    // GitHub user IDs (numeric, comma-separated) that can open /admin. IDs, not logins: a login
+    // can be renamed and claimed by someone else. 22972550 is Cobular.
+    "ADMINS": "22972550"
     // MAINTENANCE is not set here: the security-gate workflow deploys with --var MAINTENANCE:1,
     // and any normal deploy removes it again.
   },

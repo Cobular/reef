@@ -54,7 +54,8 @@ export async function showConsent(
     return page(
       "Connect to Reef",
       html`<p><strong>${shownName}</strong> wants to use Reef as your account. It will be able
-          to create, list, share, download and delete your Reef files.</p>
+          to create, list, share, download and delete your Reef files, and to read and send
+          messages in your Reef schools.</p>
         ${consent.clientDomain ? "" : html`<p>The app named itself; Reef has not verified that name.</p>`}
         <p>After you approve, you sign in with GitHub, and the app's tokens go to
           <code>${consent.redirectHost}</code>.</p>

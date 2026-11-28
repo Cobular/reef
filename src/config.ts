@@ -7,6 +7,8 @@ export const LIMITS = {
   maxResidentBytesPerAccount: 10 * GiB,
   maxResidentBytesService: 30 * GiB,
   maxUploadsPerAccountPerDay: 50,
+  /** Uploads one account may have in progress (pending) at once. */
+  maxPendingUploadsPerAccount: 2,
   maxShareList: 10,
   defaultLifetimeMinutes: 10,
   maxLifetimeMinutes: 30,
@@ -113,6 +115,13 @@ export const PART_SIZE = 94_371_840;
 export const MAX_PARTS = 10_000;
 
 export const UPLOAD_TOKEN_TTL_MS = 30 * 60 * 1000;
+/**
+ * A pending upload whose bytes haven't started arriving this long after creation is swept by
+ * the cron job, though its token lasts UPLOAD_TOKEN_TTL_MS: with at most
+ * LIMITS.maxPendingUploadsPerAccount in progress, an upload that is never sent can't hold a
+ * place (or reserved bytes) for long.
+ */
+export const UNSTARTED_UPLOAD_MS = 5 * 60 * 1000;
 export const DOWNLOAD_TOKEN_TTL_MS = 60 * 1000;
 
 /** Rows stay this long after expiry so recently expired files can still be listed. */
@@ -129,13 +138,15 @@ export const STATE_TTL_SECONDS = 10 * 60;
 export const FLASH_COOKIE = "__Host-reef-flash";
 export const FLASH_TTL_SECONDS = 60;
 
-/** True if the GitHub login is listed in the ADMINS var (comma-separated, case-insensitive). */
-export function isAdmin(env: Env, login: string): boolean {
-  const admins = String(env.ADMINS ?? "")
+/**
+ * True if the account's GitHub user ID is listed in the ADMINS var (comma-separated numeric IDs).
+ * IDs rather than logins: a GitHub login can be given up and claimed by someone else.
+ */
+export function isAdmin(env: Env, userId: number): boolean {
+  return String(env.ADMINS ?? "")
     .split(",")
-    .map((l) => l.trim().toLowerCase())
-    .filter(Boolean);
-  return admins.includes(login.toLowerCase());
+    .map((id) => id.trim())
+    .some((id) => /^[0-9]+$/.test(id) && Number(id) === userId);
 }
 
 export function publicOrigin(env: Env): string {

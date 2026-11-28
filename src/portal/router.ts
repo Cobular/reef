@@ -101,7 +101,7 @@ async function route(p: Portal, github: GitHubApi, oauth: GrantRevoker): Promise
     // Signed out already: nothing to protect, just clear the cookie.
     if (p.user && p.csrf && !formCsrfOk(p as SignedIn, await readForm(p.request)))
       return forbidden(p);
-    return logout();
+    return logout(p.env, p.user?.userId ?? null);
   }
   if (path === "/portal" && method === "GET") return redirect("/files");
   if (path === "/terms") return method === "GET" ? termsPage(p) : notFound(p);

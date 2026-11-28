@@ -46,13 +46,14 @@ export async function admit(env: Env, gh: GitHubUser, now = Date.now()): Promise
   if (invited) {
     await insertUser(db, gh.id, gh.login, now);
   } else {
-    const dayStart = utcDay(now) * DAY_MS;
+    const day = utcDay(now);
+    const dayStart = day * DAY_MS;
     const inserted = await insertUserCapped(
       db,
       gh.id,
       gh.login,
       now,
-      dayStart,
+      day,
       MAX_NEW_ACCOUNTS_PER_DAY,
     );
     if (!inserted) {
