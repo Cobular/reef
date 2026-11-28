@@ -80,7 +80,7 @@ function fileRow(p: SignedIn, view: ListedFileView): Raw {
 
 /** GET /files: the caller's files and files shared with them. */
 export async function filesPage(p: SignedIn): Promise<Response> {
-  const views = await listFiles(filesContext(p.env, p.partSize, p.now), p.user);
+  const { files: views, unknown } = await listFiles(filesContext(p.env, p.partSize, p.now), p.user);
   const live = views.filter((v) => v.status !== "gone");
   const gone = views.filter((v) => v.status === "gone");
   const body = html`<div class="head">
@@ -95,6 +95,14 @@ ${
         html`Upload a file here, or ask an agent to send one with Reef’s <code>create_upload</code> tool.`,
         uploadLink,
       )
+}
+${
+  unknown.length > 0
+    ? html`<details class="past section-gap"><summary>From accounts you share no school with (${String(unknown.length)})</summary>
+<p class="small muted">Anyone signed in to Reef can share a file with you. These came from accounts outside your schools, so agents don’t see them in <code>list_files</code>. Only download one you were expecting.</p>
+<ul class="rows" aria-label="Files from accounts you share no school with">${unknown.map((v) => fileRow(p, v))}</ul>
+</details>`
+    : ""
 }
 ${
   gone.length > 0

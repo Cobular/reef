@@ -24,13 +24,15 @@ import {
   call,
   fileRow,
   ORIGIN,
+  portalSessionFor,
   resetDb,
+  schoolWith,
   TEST_PART_SIZE,
   testEnv,
   testWorker,
 } from "./helpers";
 
-const admin = { userId: 1, login: "Cobular" };
+const admin = { userId: 22972550, login: "Cobular" };
 const bob = { userId: 2, login: "bob" };
 const carol = { userId: 3, login: "carol" };
 type Who = { userId: number; login: string };
@@ -38,13 +40,16 @@ type Who = { userId: number; login: string };
 const worker = testWorker();
 const workerEnv = testEnv();
 
+/** When this test's sessions were issued (set after the accounts are created). */
+let iat = 0;
+
 async function cookieFor(user?: Who, extra = ""): Promise<string> {
   const parts = extra ? [extra] : [];
   if (user) {
     const value = await signValue(
       env.COOKIE_SECRET,
       "session",
-      { uid: user.userId },
+      { uid: user.userId, iat },
       Date.now() + 3_600_000,
     );
     parts.push(`${SESSION_COOKIE}=${value}`);
@@ -73,7 +78,9 @@ async function post(
 ): Promise<Response> {
   const body = new URLSearchParams();
   const token =
-    options.csrf === undefined && user ? await csrfToken(workerEnv, user.userId) : options.csrf;
+    options.csrf === undefined && user
+      ? await csrfToken(workerEnv, user.userId, iat)
+      : options.csrf;
   if (token) body.set("csrf", token);
   for (const [k, v] of Object.entries(fields)) for (const one of [v].flat()) body.append(k, one);
   const headers = new Headers({ "Content-Type": "application/x-www-form-urlencoded" });
@@ -135,6 +142,7 @@ beforeEach(async () => {
   await addUser(admin.userId, admin.login);
   await addUser(bob.userId, bob.login);
   await addUser(carol.userId, carol.login);
+  iat = Date.now();
 });
 
 describe("pages and headers", () => {
@@ -181,7 +189,7 @@ describe("pages and headers", () => {
       expect(res.headers.get("Cache-Control"), path).toContain("no-store");
       const body = await res.text();
       expect(body, path).toContain(expected);
-      expect(body, path).toContain(`value="${await csrfToken(workerEnv, who.userId)}"`);
+      expect(body, path).toContain(`value="${await csrfToken(workerEnv, who.userId, iat)}"`);
       expectCleanHtml(body);
     }
   });
@@ -276,7 +284,7 @@ describe("CSRF", () => {
     expect((await post("/admin/invites/add", admin, { login: "x1" }, { csrf: null })).status).toBe(
       403,
     );
-    const otherToken = await csrfToken(workerEnv, bob.userId);
+    const otherToken = await csrfToken(workerEnv, bob.userId, iat);
     expect(
       (await post("/admin/invites/add", admin, { login: "x2" }, { csrf: otherToken })).status,
     ).toBe(403);
@@ -396,6 +404,18 @@ describe("file detail and download", () => {
     const late = await get(`/files/${file.file.id}`, bob);
     expect(late.status).toBe(410);
     expect(await late.text()).toContain("This file has swum off.");
+  });
+
+  it("sets apart files from accounts outside your schools", async () => {
+    const file = await readyFile(bob, ["Cobular"]);
+    const apart = await (await get("/files", admin)).text();
+    expect(apart).toContain("From accounts you share no school with (1)");
+    expect(apart).toContain("Nothing in the water right now.");
+    expect(apart).toContain(`/files/${file.file.id}`);
+    await schoolWith([admin.userId, bob.userId]);
+    const together = await (await get("/files", admin)).text();
+    expect(together).not.toContain("From accounts you share no school with");
+    expect(together).toContain(`/files/${file.file.id}`);
   });
 
   it("names who a file is shared with, and shows expiry as a clock time", async () => {
@@ -822,13 +842,21 @@ describe("admin", () => {
     expect((await get("/admin", bob)).status).toBe(404);
     expect((await post("/admin/users/ban", bob, { user: "3" })).status).toBe(404);
     expect((await get("/admin")).status).toBe(303);
-    const other = { ...testEnv(), ADMINS: "bob" } as unknown as Env;
+    const other = { ...testEnv(), ADMINS: ` ${bob.userId}, nonsense` } as unknown as Env;
     const asBob = await call(
       worker,
       new Request(`${ORIGIN}/admin`, { headers: { Cookie: await cookieFor(bob) } }),
       other,
     );
     expect(asBob.status).toBe(200);
+    // ADMINS holds numeric GitHub IDs; a login there (which another account could take) is ignored.
+    const byLogin = { ...testEnv(), ADMINS: bob.login } as unknown as Env;
+    const asBobByLogin = await call(
+      worker,
+      new Request(`${ORIGIN}/admin`, { headers: { Cookie: await cookieFor(bob) } }),
+      byLogin,
+    );
+    expect(asBobByLogin.status).toBe(404);
   });
 
   it("bans and unbans, but never yourself", async () => {
@@ -839,7 +867,10 @@ describe("admin", () => {
     expect(await followFlash(self, admin)).toContain("You can’t ban your own account.");
     const unbanned = await post("/admin/users/unban", admin, { user: String(bob.userId) });
     expect(await followFlash(unbanned, admin)).toContain("Unbanned bob.");
-    expect((await get("/files", bob)).status).toBe(200);
+    // A session from before the ban stays ended; signing in again works.
+    expect((await get("/files", bob)).status).toBe(303);
+    const fresh = await portalSessionFor(bob.userId, Date.now() + 1);
+    expect((await get("/files", undefined, fresh.cookie)).status).toBe(200);
   });
 
   it("adds and removes invites and deletes files by ID", async () => {
@@ -880,8 +911,8 @@ describe("admin", () => {
     expect(await addInvite(env.DB, "zed", 2)).toBe(false);
     expect(await removeInvite(env.DB, "ZED")).toBe(true);
     expect(await removeInvite(env.DB, "zed")).toBe(false);
-    expect((await setBanned(env.DB, carol.userId, true))?.banned).toBeTruthy();
-    expect(await setBanned(env.DB, 999, true)).toBeNull();
+    expect((await setBanned(env.DB, carol.userId, true, Date.now()))?.banned).toBeTruthy();
+    expect(await setBanned(env.DB, 999, true, Date.now())).toBeNull();
     expect((await listUsers(env.DB)).map((u) => u.login)).toEqual(
       expect.arrayContaining(["Cobular", "bob", "carol"]),
     );
@@ -946,7 +977,8 @@ describe("terms", () => {
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
     const body = await res.text();
     expect(body).toContain("Terms of use");
-    expect(body).toContain("2026-11-23");
+    expect(body).toContain("2026-11-28");
+    expect(body).toContain("A banned account can’t sign in");
     expect(body).toContain('href="/account"');
     expect(body).toContain("https://github.com/Cobular/reef/issues/new?template=abuse-report.yml");
     expectCleanHtml(body);

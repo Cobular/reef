@@ -22,13 +22,14 @@ export interface DeletedAccount {
  *    messages in every other school, after raising each school's seq_floor to the highest seq
  *    deleted (so insertMessage never hands it out again); its other memberships and pending
  *    invites; the schools it created pass to another member; shares of other people's files
- *    with it; its files (their shares and upload parts cascade); its sessions (read positions
- *    cascade); its invite; and the `users` row last, once nothing references it.
+ *    with it; its download receipts; its files (their shares and upload parts cascade); its
+ *    sessions (read positions cascade); its invite; and the `users` row last, once nothing
+ *    references it.
  * 3. The R2 objects of the deleted file rows, and any unfinished multipart uploads. Reef never
  *    stored the keys, so an object a failure here leaves behind can't be read.
  *
- * Returns null if there is no such account. The day's school invite count stays (it has no
- * foreign key), so deleting and signing up again doesn't reset it.
+ * Returns null if there is no such account. The day's school invite, upload and signup counts
+ * stay (they have no foreign key), so deleting and signing up again doesn't reset them.
  */
 export async function deleteAccount(
   env: Env,
@@ -41,7 +42,7 @@ export async function deleteAccount(
 
   const grants = await revokeGrants(oauth, String(userId));
 
-  const [schools, , messages, memberships, , , files] = await db.batch([
+  const [schools, , messages, memberships, , , , files] = await db.batch([
     // As when the last accepted member leaves: messages, members and positions cascade.
     db
       .prepare(
@@ -70,6 +71,7 @@ export async function deleteAccount(
       )
       .bind(userId),
     db.prepare("DELETE FROM file_shares WHERE user_id = ?").bind(userId),
+    db.prepare("DELETE FROM download_receipts WHERE user_id = ?").bind(userId),
     db.prepare("DELETE FROM files WHERE owner_id = ? RETURNING id, r2_upload_id").bind(userId),
     // In the same batch as the file delete: serviceResidentBytes relies on it.
     refreshServiceStats(db),

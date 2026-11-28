@@ -37,7 +37,7 @@ const exampleFile = html`<figure class="demo" aria-label="An example file handof
 <dl class="kv small"><dt>Size</dt><dd>3.2 GB</dd><dt>From</dt><dd>A Claude chat</dd><dt>Shared with</dt><dd>Just you, so your other sessions can fetch it</dd></dl>
 <div class="demo-tide"><div class="tide" role="presentation"><span class="w60"></span></div><span class="left">18 minutes left</span></div>
 <p class="small muted demo-label">The handoff line the other session receives</p>
-<code class="demo-code">Reef handoff: id=f_8k2q… key=Zq0R… name=eval-run-0412.tar.zst expires=2026-11-22T18:40:00Z</code>
+<code class="demo-code">Reef handoff: id=f_8k2q… key=Zq0R… name="eval-run-0412.tar.zst" expires=2026-11-22T18:40:00Z</code>
 </div>
 </figure>`;
 

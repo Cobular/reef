@@ -5,7 +5,7 @@ import {
   SESSION_TTL_SECONDS,
   STATE_TTL_SECONDS,
 } from "../config";
-import { getUser } from "../files/repo";
+import { endSessions, getUser } from "../files/repo";
 import { randomToken, timingSafeEqualStrings } from "../lib/crypto";
 import { errorPage } from "../lib/html";
 import { clearCookie, getCookie, redirect, safeNext, setCookie } from "../lib/http";
@@ -19,21 +19,41 @@ export const PORTAL_CALLBACK_PATH = "/auth/callback/portal";
 export interface PortalSession {
   userId: number;
   login: string;
+  /** When the session cookie was issued (ms); the form token is bound to it. */
+  iat: number;
 }
 
-/** The account ID in a valid session cookie, without touching D1 (for cheap rate limiting). */
-export async function sessionUserId(request: Request, env: Env): Promise<number | null> {
+/**
+ * The account ID and issue time in a validly signed session cookie, without touching D1 (for
+ * cheap rate limiting). It doesn't say the session is still live; `portalSession` checks that.
+ */
+export async function sessionCookie(
+  request: Request,
+  env: Env,
+): Promise<{ uid: number; iat: number } | null> {
   const data = await verifyValue(env.COOKIE_SECRET, "session", getCookie(request, SESSION_COOKIE));
-  return data && typeof data.uid === "number" ? data.uid : null;
+  return data && typeof data.uid === "number" && typeof data.iat === "number"
+    ? { uid: data.uid, iat: data.iat }
+    : null;
 }
 
-/** Reads the session cookie and rechecks the account, so a ban takes effect at once. */
+/** The account ID in a validly signed session cookie, without touching D1. */
+export async function sessionUserId(request: Request, env: Env): Promise<number | null> {
+  return (await sessionCookie(request, env))?.uid ?? null;
+}
+
+/**
+ * Reads the session cookie and rechecks the account, so a ban takes effect at once. A cookie
+ * issued before the account was created (an earlier account under the same GitHub ID) or at or
+ * before its sessions_valid_after (signed out everywhere, or unbanned since) is refused.
+ */
 export async function portalSession(request: Request, env: Env): Promise<PortalSession | null> {
-  const uid = await sessionUserId(request, env);
-  if (uid === null) return null;
-  const user = await getUser(env.DB, uid);
+  const cookie = await sessionCookie(request, env);
+  if (cookie === null) return null;
+  const user = await getUser(env.DB, cookie.uid);
   if (!user || user.banned) return null;
-  return { userId: user.id, login: user.login };
+  if (cookie.iat < user.created_at || cookie.iat <= user.sessions_valid_after) return null;
+  return { userId: user.id, login: user.login, iat: cookie.iat };
 }
 
 /**
@@ -118,11 +138,12 @@ export async function finishLogin(
   const admission = await admit(env, user);
   if (!admission.ok) return withHeaders(refusalPage(admission), clear);
 
+  const now = Date.now();
   const session = await signValue(
     env.COOKIE_SECRET,
     "session",
-    { uid: admission.userId },
-    Date.now() + SESSION_TTL_SECONDS * 1000,
+    { uid: admission.userId, iat: now },
+    now + SESSION_TTL_SECONDS * 1000,
   );
   const next = typeof saved.n === "string" ? safeNext(saved.n) : null;
   const headers = new Headers({ Location: next ?? "/files", "Cache-Control": "no-store" });
@@ -131,8 +152,12 @@ export async function finishLogin(
   return new Response(null, { status: 302, headers });
 }
 
-/** Ends the portal session: POST /logout (the portal router checks CSRF first). */
-export function logout(): Response {
+/**
+ * POST /logout (the portal router checks CSRF first): clears the cookie and, for a signed-in
+ * account, ends its sessions in every browser.
+ */
+export async function logout(env: Env, userId: number | null): Promise<Response> {
+  if (userId !== null) await endSessions(env.DB, userId, Date.now());
   return redirect("/", { "Set-Cookie": clearCookie(SESSION_COOKIE) }, 303);
 }
 

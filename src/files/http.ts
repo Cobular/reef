@@ -12,9 +12,12 @@ import {
   deleteParts,
   type FileRow,
   getFile,
+  hasDownloaded,
   isActiveUser,
   listParts,
   markReady,
+  markUploadStarted,
+  recordDownload,
   recordPart,
 } from "./repo";
 import { assertDownloadable, type FilesContext, filesContext, ReefError } from "./service";
@@ -120,6 +123,19 @@ function partCount(file: FileRow, partSize: number): number {
   return file.size > partSize ? Math.ceil(file.size / partSize) : 1;
 }
 
+/**
+ * Marks the upload as started before any bytes are streamed, so the cron job's sweep of uploads
+ * that never started leaves it alone.
+ */
+async function startUpload(ctx: FilesContext, file: FileRow): Promise<void> {
+  if (file.upload_started_at != null) return;
+  if (!(await markUploadStarted(ctx.env.DB, file.id, ctx.now)))
+    throw new ReefError(
+      410,
+      "This upload was cleared because no bytes arrived in time. Call create_upload again.",
+    );
+}
+
 async function finish(ctx: FilesContext, file: FileRow): Promise<Response> {
   const expiresAt = await markReady(ctx.env.DB, file.id, ctx.now);
   if (expiresAt === null) {
@@ -144,6 +160,7 @@ async function uploadWhole(request: Request, ctx: FilesContext, token: string) {
       `This file uploads in parts: PUT ${publicOrigin(ctx.env)}/up/<token>/<n>.`,
     );
   checkContentLength(request, file.size);
+  await startUpload(ctx, file);
   try {
     await ctx.storage.put(
       file.id,
@@ -167,6 +184,7 @@ async function uploadPart(request: Request, ctx: FilesContext, token: string, pa
   if (n < 1 || n > total) throw new ReefError(400, `Part number must be 1 to ${total}.`);
   const expected = n < total ? ctx.partSize : file.size - ctx.partSize * (total - 1);
   checkContentLength(request, expected);
+  await startUpload(ctx, file);
   let etag: string;
   try {
     etag = await ctx.storage.uploadPart(
@@ -264,12 +282,22 @@ export async function streamDownload(
   const counts = range === null || range.offset === 0;
   if (counts && file.download_limit !== null && file.download_count >= file.download_limit)
     throw new ReefError(410, "The file's download limit is used up.");
+  // A free range only resumes a download this account already started, so ranges can't be used
+  // to fetch a whole file in pieces without it ever counting.
+  if (!counts && !(await hasDownloaded(ctx.env.DB, file.id, userId)))
+    throw new ReefError(
+      409,
+      "Start the download from the first byte: a range that skips it only resumes a download you've already begun.",
+    );
 
   const object = await ctx.storage.get(file.id, key, range ?? undefined);
   if (!object) throw new ReefError(410, "The file has expired or been deleted.");
-  if (counts && !(await countDownload(ctx.env.DB, file.id, ctx.now))) {
-    await object.body.cancel();
-    throw new ReefError(410, "The file's download limit is used up.");
+  if (counts) {
+    if (!(await countDownload(ctx.env.DB, file.id, ctx.now))) {
+      await object.body.cancel();
+      throw new ReefError(410, "The file's download limit is used up.");
+    }
+    await recordDownload(ctx.env.DB, file.id, userId);
   }
   logEvent("file.download", {
     file: file.id,

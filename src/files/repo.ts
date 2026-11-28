@@ -5,6 +5,8 @@ export interface UserRow {
   login: string;
   created_at: number;
   banned: number;
+  /** Session cookies issued at or before this time are refused (sign-out everywhere, unban). */
+  sessions_valid_after: number;
 }
 
 export interface FileRow {
@@ -19,10 +21,20 @@ export interface FileRow {
   expires_at: number | null;
   download_limit: number | null;
   download_count: number;
+  /** When the first request carrying the upload's bytes arrived; null (or absent) until then. */
+  upload_started_at?: number | null;
 }
 
 export interface ListedFile extends FileRow {
   owner_login: string;
+}
+
+/** A login that names more than one active account (GitHub logins can be reused). */
+export class AmbiguousLoginError extends Error {
+  constructor(readonly logins: string[]) {
+    super(`ambiguous logins: ${logins.join(", ")}`);
+    this.name = "AmbiguousLoginError";
+  }
 }
 
 // ---- users ---------------------------------------------------------------------------------
@@ -36,13 +48,32 @@ export async function isActiveUser(db: D1Database, id: number): Promise<boolean>
   return user !== null && user.banned === 0;
 }
 
-export async function findUsersByLogins(db: D1Database, logins: string[]): Promise<UserRow[]> {
+/**
+ * Accounts with these logins (case-insensitive), active ones only unless `includeBanned`. Two
+ * accounts can hold the same login when someone renamed on GitHub and another person took the
+ * old name before the first signed in again; such a login throws AmbiguousLoginError rather than
+ * picking one.
+ */
+export async function findUsersByLogins(
+  db: D1Database,
+  logins: string[],
+  includeBanned = false,
+): Promise<UserRow[]> {
   if (logins.length === 0) return [];
   const marks = logins.map(() => "?").join(",");
   const result = await db
-    .prepare(`SELECT * FROM users WHERE login COLLATE NOCASE IN (${marks})`)
+    .prepare(
+      `SELECT * FROM users WHERE login COLLATE NOCASE IN (${marks})${includeBanned ? "" : " AND banned = 0"}`,
+    )
     .bind(...logins)
     .all<UserRow>();
+  const byLogin = new Map<string, UserRow[]>();
+  for (const u of result.results) {
+    const key = u.login.toLowerCase();
+    byLogin.set(key, [...(byLogin.get(key) ?? []), u]);
+  }
+  const ambiguous = [...byLogin.values()].filter((us) => us.length > 1).map((us) => us[0]?.login);
+  if (ambiguous.length > 0) throw new AmbiguousLoginError(ambiguous as string[]);
   return result.results;
 }
 
@@ -59,26 +90,35 @@ export async function insertUser(db: D1Database, id: number, login: string, now:
 }
 
 /**
- * Inserts the account only if fewer than `cap` accounts were created since `since`, in one
- * statement so two sign-ins at once can't both take the last place. The count stops at `cap`
- * rows of the users_created index. Returns false when the day is full.
+ * Inserts the account only if fewer than `cap` accounts were counted on UTC day `day`, and counts
+ * it, in one transaction so two sign-ins at once can't both take the last place. The count lives
+ * in signups_daily, so deleting an account doesn't give its place back. Returns false when the
+ * day is full. Only for logins with no account yet.
  */
 export async function insertUserCapped(
   db: D1Database,
   id: number,
   login: string,
   now: number,
-  since: number,
+  day: number,
   cap: number,
 ): Promise<boolean> {
-  const result = await db
-    .prepare(
-      `INSERT INTO users (id, login, created_at) SELECT ?1, ?2, ?3
-       WHERE (SELECT COUNT(*) FROM (SELECT 1 FROM users WHERE created_at >= ?4 LIMIT ?5)) < ?5`,
-    )
-    .bind(id, login, now, since, cap)
-    .run();
-  return result.meta.changes > 0;
+  const [inserted] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO users (id, login, created_at) SELECT ?1, ?2, ?3
+         WHERE COALESCE((SELECT created FROM signups_daily WHERE day = ?4), 0) < ?5`,
+      )
+      .bind(id, login, now, day, cap),
+    db
+      .prepare(
+        `INSERT INTO signups_daily (day, created)
+         SELECT ?1, 1 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2 AND created_at = ?3)
+         ON CONFLICT (day) DO UPDATE SET created = created + 1`,
+      )
+      .bind(day, id, now),
+  ]);
+  return (inserted?.meta.changes ?? 0) > 0;
 }
 
 export async function updateUserLogin(db: D1Database, id: number, login: string) {
@@ -91,13 +131,44 @@ export function getFile(db: D1Database, id: string): Promise<FileRow | null> {
   return db.prepare("SELECT * FROM files WHERE id = ?").bind(id).first<FileRow>();
 }
 
-export async function insertFile(db: D1Database, file: FileRow, shareUserIds: number[]) {
-  const statements = [
+export interface UploadCaps {
+  /** UTC day (utcDay) the upload counts against. */
+  day: number;
+  maxPerDay: number;
+  maxPending: number;
+  maxAccountBytes: number;
+  maxServiceBytes: number;
+}
+
+/** The service-wide resident-bytes estimate (see serviceResidentBytes), as a SQL expression. */
+const SERVICE_BYTES = `(SELECT COALESCE(s.resident_bytes, 0) + COALESCE((SELECT SUM(size) FROM files
+    WHERE rowid > COALESCE(s.max_file_rowid, 0) AND state != 'deleted'), 0)
+  FROM (SELECT 1) LEFT JOIN service_stats s ON s.id = 1)`;
+
+/**
+ * Inserts a pending file, its share list and a count in uploads_started, in one transaction, only
+ * if every upload cap still holds with this file included: uploads today, uploads in progress,
+ * the account's resident bytes and the service's. Checking and inserting in one statement means
+ * concurrent calls can't all pass a check that only one of them should. Returns false (and
+ * writes nothing) when a cap would be exceeded.
+ */
+export async function insertFileCapped(
+  db: D1Database,
+  file: FileRow,
+  shareUserIds: number[],
+  caps: UploadCaps,
+): Promise<boolean> {
+  const [inserted] = await db.batch([
     db
       .prepare(
         `INSERT INTO files (id, owner_id, name, size, state, r2_upload_id, lifetime_minutes,
            created_at, expires_at, download_limit, download_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+         WHERE COALESCE((SELECT started FROM uploads_started WHERE day = ?12 AND user_id = ?2), 0) < ?13
+           AND (SELECT COUNT(*) FROM files WHERE owner_id = ?2 AND state = 'pending') < ?14
+           AND (SELECT COALESCE(SUM(size), 0) FROM files WHERE owner_id = ?2 AND state != 'deleted')
+             + ?4 <= ?15
+           AND ${SERVICE_BYTES} + ?4 <= ?16`,
       )
       .bind(
         file.id,
@@ -111,12 +182,29 @@ export async function insertFile(db: D1Database, file: FileRow, shareUserIds: nu
         file.expires_at,
         file.download_limit,
         file.download_count,
+        caps.day,
+        caps.maxPerDay,
+        caps.maxPending,
+        caps.maxAccountBytes,
+        caps.maxServiceBytes,
       ),
     ...shareUserIds.map((uid) =>
-      db.prepare("INSERT INTO file_shares (file_id, user_id) VALUES (?, ?)").bind(file.id, uid),
+      db
+        .prepare(
+          `INSERT INTO file_shares (file_id, user_id)
+           SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM files WHERE id = ?1)`,
+        )
+        .bind(file.id, uid),
     ),
-  ];
-  await db.batch(statements);
+    db
+      .prepare(
+        `INSERT INTO uploads_started (day, user_id, started)
+         SELECT ?1, ?2, 1 WHERE EXISTS (SELECT 1 FROM files WHERE id = ?3)
+         ON CONFLICT (day, user_id) DO UPDATE SET started = started + 1`,
+      )
+      .bind(caps.day, file.owner_id, file.id),
+  ]);
+  return (inserted?.meta.changes ?? 0) > 0;
 }
 
 /** pending → ready. Returns the new expiry, or null if the file was no longer pending. */
@@ -208,9 +296,23 @@ export async function setShares(db: D1Database, fileId: string, add: number[], r
   if (statements.length > 0) await db.batch(statements);
 }
 
-/** Files the user owns or is shared on: live ones, plus those gone since `goneSince`. */
-const VISIBLE_FILES = `(f.owner_id = ?1 OR f.id IN (SELECT file_id FROM file_shares WHERE user_id = ?1))
+/**
+ * Files the user owns or is shared on: live ones, plus those gone since `goneSince`. Another
+ * account's upload that hasn't finished isn't listed to the people it's shared with.
+ */
+const VISIBLE_FILES = `(f.owner_id = ?1 OR (f.state != 'pending'
+    AND f.id IN (SELECT file_id FROM file_shares WHERE user_id = ?1)))
   AND (f.state != 'deleted' OR COALESCE(f.expires_at, f.created_at) > ?2)`;
+
+/**
+ * 1 when the file is the user's own or its owner is an accepted member of a school the user has
+ * also accepted: someone the user has agreed to hear from. Listings set other files apart, so
+ * anyone with an account can't put names in front of anyone else's agent just by sharing.
+ */
+const KNOWN_OWNER = `(f.owner_id = ?1 OR EXISTS (SELECT 1 FROM school_members mine
+    JOIN school_members theirs ON theirs.school_id = mine.school_id
+    WHERE mine.user_id = ?1 AND mine.accepted = 1
+      AND theirs.user_id = f.owner_id AND theirs.accepted = 1))`;
 
 export interface ShareRow {
   file_id: string;
@@ -220,17 +322,18 @@ export interface ShareRow {
 
 /**
  * The files a user can see (live ones, plus those gone since `goneSince`) and their share
- * lists, in one round trip.
+ * lists, in one round trip. `known` is 0 for files from accounts the user shares no school with.
  */
 export async function listFilesFor(
   db: D1Database,
   userId: number,
   goneSince: number,
-): Promise<{ files: ListedFile[]; shares: ShareRow[] }> {
+): Promise<{ files: (ListedFile & { known: number })[]; shares: ShareRow[] }> {
   const [files, shares] = await db.batch<ListedFile | ShareRow>([
     db
       .prepare(
-        `SELECT f.*, u.login AS owner_login FROM files f JOIN users u ON u.id = f.owner_id
+        `SELECT f.*, u.login AS owner_login, ${KNOWN_OWNER} AS known
+         FROM files f JOIN users u ON u.id = f.owner_id
          WHERE ${VISIBLE_FILES}
          ORDER BY f.created_at DESC LIMIT 200`,
       )
@@ -244,7 +347,7 @@ export async function listFilesFor(
       .bind(userId, goneSince),
   ]);
   return {
-    files: (files?.results ?? []) as ListedFile[],
+    files: (files?.results ?? []) as (ListedFile & { known: number })[],
     shares: (shares?.results ?? []) as ShareRow[],
   };
 }
@@ -316,16 +419,31 @@ export async function listUsers(db: D1Database): Promise<UserRow[]> {
   return result.results;
 }
 
-/** Sets or clears the banned flag; returns the user, or null if there is no such account. */
+/**
+ * Sets or clears the banned flag and ends the account's portal sessions, so a cookie from before
+ * a ban doesn't work again after an unban. Returns the user, or null if there is no such account.
+ */
 export async function setBanned(
   db: D1Database,
   userId: number,
   banned: boolean,
+  now: number,
 ): Promise<UserRow | null> {
   return db
-    .prepare("UPDATE users SET banned = ? WHERE id = ? RETURNING *")
-    .bind(banned ? 1 : 0, userId)
+    .prepare(
+      `UPDATE users SET banned = ?, sessions_valid_after = MAX(sessions_valid_after, ?)
+       WHERE id = ? RETURNING *`,
+    )
+    .bind(banned ? 1 : 0, now, userId)
     .first<UserRow>();
+}
+
+/** Ends every portal session the account has, in every browser. */
+export async function endSessions(db: D1Database, userId: number, now: number) {
+  await db
+    .prepare("UPDATE users SET sessions_valid_after = MAX(sessions_valid_after, ?) WHERE id = ?")
+    .bind(now, userId)
+    .run();
 }
 
 // ---- quotas --------------------------------------------------------------------------------
@@ -380,12 +498,53 @@ export function refreshServiceStats(db: D1Database): D1PreparedStatement {
   );
 }
 
-export async function uploadsSince(db: D1Database, ownerId: number, since: number) {
+/** Uploads the account has started on UTC day `day` (uploads_started; survives deletions). */
+export async function uploadsOnDay(db: D1Database, ownerId: number, day: number) {
   const row = await db
-    .prepare("SELECT COUNT(*) AS n FROM files WHERE owner_id = ? AND created_at > ?")
-    .bind(ownerId, since)
+    .prepare("SELECT started FROM uploads_started WHERE day = ? AND user_id = ?")
+    .bind(day, ownerId)
+    .first<{ started: number }>();
+  return row?.started ?? 0;
+}
+
+/** The account's uploads still in progress. */
+export async function pendingUploads(db: D1Database, ownerId: number) {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS n FROM files WHERE owner_id = ? AND state = 'pending'")
+    .bind(ownerId)
     .first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/**
+ * Records that the first request carrying an upload's bytes arrived. Returns false if the file
+ * is no longer pending (the cron job may have swept it).
+ */
+export async function markUploadStarted(db: D1Database, id: string, now: number) {
+  const result = await db
+    .prepare(
+      `UPDATE files SET upload_started_at = COALESCE(upload_started_at, ?)
+       WHERE id = ? AND state = 'pending'`,
+    )
+    .bind(now, id)
+    .run();
+  return result.meta.changes > 0;
+}
+
+/** Notes that an account had a counted download of a file, so it may resume with ranges. */
+export async function recordDownload(db: D1Database, fileId: string, userId: number) {
+  await db
+    .prepare("INSERT OR IGNORE INTO download_receipts (file_id, user_id) VALUES (?, ?)")
+    .bind(fileId, userId)
+    .run();
+}
+
+export async function hasDownloaded(db: D1Database, fileId: string, userId: number) {
+  const row = await db
+    .prepare("SELECT 1 AS ok FROM download_receipts WHERE file_id = ? AND user_id = ?")
+    .bind(fileId, userId)
+    .first();
+  return row !== null;
 }
 
 // ---- upload parts --------------------------------------------------------------------------

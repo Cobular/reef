@@ -6,16 +6,37 @@ export function shellQuote(value: string): string {
 }
 
 /**
- * File names are shown in commands, handoff lines and Content-Disposition, so they must be
- * a plain name: no path separators, no control characters, not `.` or `..`.
+ * Control (Cc), format (Cf: bidi overrides, zero-width characters) and line/paragraph separator
+ * (Zl, Zp) characters. Refused in names people choose, since they can break a line or reorder
+ * how it reads. The zero-width joiner (U+200D) is allowed: it can't break or reorder text, and
+ * emoji such as 👩‍💻 need it.
+ */
+export const HIDDEN_CHARS = /[\p{Cc}\p{Zl}\p{Zp}]|(?!\u200D)\p{Cf}/u;
+
+/**
+ * A name chosen by another account, for tool output: a JSON string literal, with any
+ * HIDDEN_CHARS escaped (JSON.stringify leaves Cf and U+2028/U+2029 as they are), so it can't
+ * end the line or pass as Reef's own text.
+ */
+export function quoted(value: string): string {
+  return JSON.stringify(value).replace(
+    /[\p{Zl}\p{Zp}]|(?!\u200D)\p{Cf}/gu,
+    (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/**
+ * File names are shown in commands, handoff lines, tool output and Content-Disposition, so they
+ * must be a plain name: no path separators, no control, format or line-separator characters,
+ * not `.` or `..`.
  */
 export function fileNameProblem(name: string): string | null {
   if (name.length === 0) return "name must not be empty";
   if (name.length > LIMITS.maxFileNameLength)
     return `name must be at most ${LIMITS.maxFileNameLength} characters`;
   if (/[/\\]/.test(name)) return "name must be a file name, not a path (no / or \\)";
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
-  if (/[\u0000-\u001f\u007f]/.test(name)) return "name must not contain control characters";
+  if (HIDDEN_CHARS.test(name))
+    return "name must not contain control, invisible formatting or line-separator characters";
   if (name === "." || name === "..") return "name must not be . or ..";
   if (name.trim() !== name) return "name must not start or end with whitespace";
   return null;
@@ -26,8 +47,9 @@ export function utc(ms: number): string {
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+/** The handoff line. The name is a JSON string, and last but one, after id= and key=. */
 export function handoffLine(fileId: string, key: string, name: string, expiresAt: number): string {
-  return `Reef handoff: id=${fileId} key=${key} name=${name} expires=${utc(expiresAt)}`;
+  return `Reef handoff: id=${fileId} key=${key} name=${quoted(name)} expires=${utc(expiresAt)}`;
 }
 
 export function uploadCommand(origin: string, token: string, key: string, name: string): string {
@@ -36,8 +58,24 @@ export function uploadCommand(origin: string, token: string, key: string, name: 
   )}`;
 }
 
-export function downloadCommand(origin: string, token: string, name: string): string {
-  return `curl -sSf -H 'X-Key: <key>' -o ${shellQuote(name)} ${shellQuote(`${origin}/dl/${token}`)}`;
+/** Where a download lands: reef-<id>/<name>, with a leading dot replaced so it isn't hidden. */
+export function downloadPath(fileId: string, name: string): string {
+  return `reef-${fileId}/${name.replace(/^\./, "_")}`;
+}
+
+/**
+ * The download command. The file goes into its own new directory, reef-<id>/, so a name the
+ * sender chose can't overwrite or hide among the receiver's files.
+ */
+export function downloadCommand(
+  origin: string,
+  token: string,
+  fileId: string,
+  name: string,
+): string {
+  return `mkdir -p ${shellQuote(`reef-${fileId}`)} && curl -sSf -H 'X-Key: <key>' -o ${shellQuote(
+    downloadPath(fileId, name),
+  )} ${shellQuote(`${origin}/dl/${token}`)}`;
 }
 
 /**
