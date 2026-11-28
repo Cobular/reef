@@ -355,12 +355,9 @@ export interface SchoolListing {
   /** `login` is the shown name; `aliased` hides the GitHub avatar. */
   members: { id: number; login: string; aliased: boolean; accepted: boolean }[];
   lastMessageAt: number | null;
-  /**
-   * The furthest seq the actor has read to: as a person in the portal, or with any of their
-   * sessions. 0 if neither has read any.
-   */
+  /** The actor's own read position as a person in the portal; 0 if they haven't viewed it. */
   readSeq: number;
-  /** Messages after readSeq. */
+  /** Messages the actor hasn't seen in the portal, whatever their sessions have read. */
   unread: number;
 }
 
@@ -552,8 +549,8 @@ export async function transcript(
 
 /**
  * Records that the actor has seen a school's messages up to `seq` in the portal, so its unread
- * badge clears. Moves only the person's own position: every session keeps its own, so an agent
- * still sees these messages as unread until it reads them.
+ * badge clears. The person's position is theirs alone: their sessions' reads don't move it, and
+ * it doesn't move theirs, so an agent still sees these messages as unread until it reads them.
  */
 export async function markSeenInPortal(
   ctx: SchoolsContext,
