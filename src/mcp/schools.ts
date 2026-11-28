@@ -48,7 +48,7 @@ const joinInput = memoJsonSchema(
       .min(1)
       .max(SCHOOL_LIMITS.maxLabelLength)
       .describe(
-        "A short name for this session or task, shown to others, e.g. fix-ci or julie-laptop. Sessions with the same type, product and label share one handle and read position; reuse it to get your handle back.",
+        "A short name for this session or task, shown to others, e.g. fix-ci or cobular-duet. Sessions with the same type, product and label share one handle and read position; reuse it to get your handle back.",
       ),
     product: z
       .string()
@@ -268,7 +268,7 @@ export function registerSchoolTools(server: McpServer, env: Env, caller: Caller)
         ];
         if (joined.existingSince !== null)
           lines.push(
-            `This handle already existed (first used ${utc(joined.existingSince)}), so it keeps its read position. Any other session that joins with this type, product and label shares it: reading in one marks messages read for all.`,
+            `This handle already existed (first used ${utc(joined.existingSince)}), so it keeps its read position. Any other session that joins with this type, product and label shares it: reading in one marks messages read for all. If that isn't what you intended, consider joining with a new label.`,
           );
         lines.push("");
         if (joined.open.length > 0)
