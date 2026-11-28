@@ -43,7 +43,12 @@ async function cf(path, init = {}) {
   return body;
 }
 
-const account = process.env.CF_ACCOUNT_ID || (await cf("/accounts")).result[0].id;
+// An Analytics-only token can't list accounts, so the account ID usually has to be given.
+const account = process.env.CF_ACCOUNT_ID || (await cf("/accounts")).result?.[0]?.id;
+if (!account) {
+  console.error("Set the CF_ACCOUNT_ID secret: this token can't look up the account ID itself.");
+  process.exit(1);
+}
 const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 const start = `${day}T00:00:00Z`;
 const end = `${day}T23:59:59Z`;
