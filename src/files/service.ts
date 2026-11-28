@@ -15,7 +15,7 @@ import {
   canAccess,
   type FileRow,
   fileWithShares,
-  findUsersByLogins,
+  findUsersByNames,
   getFile,
   getUser,
   insertFileCapped,
@@ -84,6 +84,7 @@ export interface CreatedUpload {
   shareWith: string[];
 }
 
+/** Account names as typed (GitHub logins or display names), trimmed, without a leading @. */
 export function uniqueLogins(logins: string[]): string[] {
   const seen = new Map<string, string>();
   for (const raw of logins) {
@@ -93,24 +94,28 @@ export function uniqueLogins(logins: string[]): string[] {
   return [...seen.values()];
 }
 
-/** Resolves logins to accounts; refuses any that are not existing, active accounts. */
-async function resolveAccounts(db: D1Database, logins: string[]) {
-  const users = await accountsByLogin(db, logins);
-  const found = new Set(users.map((u) => u.login.toLowerCase()));
-  const missing = logins.filter((l) => !found.has(l.toLowerCase()));
+/**
+ * Resolves account names (GitHub logins or display names) to active accounts other than the
+ * caller; refuses any that are not. Each account appears once.
+ */
+async function resolveAccounts(db: D1Database, caller: Caller, names: string[]) {
+  const found = await accountsByName(db, names);
+  const missing = names.filter((n) => !found.has(n.toLowerCase()));
   if (missing.length > 0) {
     throw new ReefError(
       400,
       `Not Reef accounts: ${missing.join(", ")}. Share lists only accept people who have signed in to Reef.`,
     );
   }
-  return users;
+  const byId = new Map([...found.values()].map((u) => [u.id, u]));
+  byId.delete(caller.userId);
+  return [...byId.values()];
 }
 
-/** findUsersByLogins, with a login held by two accounts refused as a ReefError. */
-export async function accountsByLogin(db: D1Database, logins: string[], includeBanned = false) {
+/** findUsersByNames, with a login held by two accounts refused as a ReefError. */
+export async function accountsByName(db: D1Database, names: string[], includeBanned = false) {
   try {
-    return await findUsersByLogins(db, logins, includeBanned);
+    return await findUsersByNames(db, names, includeBanned);
   } catch (error) {
     if (error instanceof AmbiguousLoginError)
       throw new ReefError(
@@ -170,12 +175,10 @@ export async function createUpload(
   const keyBytes = parseKey(key);
   if (!keyBytes) throw new ReefError(400, "key must be 32 random bytes, base64-encoded");
 
-  const logins = uniqueLogins(input.share_with ?? []).filter(
-    (l) => l.toLowerCase() !== caller.login.toLowerCase(),
-  );
-  if (logins.length > LIMITS.maxShareList)
+  const names = uniqueLogins(input.share_with ?? []);
+  const shares = await resolveAccounts(db, caller, names);
+  if (shares.length > LIMITS.maxShareList)
     throw new ReefError(400, `A share list holds at most ${LIMITS.maxShareList} accounts`);
-  const shares = await resolveAccounts(db, logins);
 
   const caps: UploadCaps = {
     day: utcDay(ctx.now),
@@ -233,7 +236,7 @@ export async function createUpload(
     ...(multipart ? { python: multipartPython(origin, token, key, input.name, ctx.partSize) } : {}),
     // The clock starts when the upload finishes; this is the earliest possible expiry.
     handoff: handoffLine(id, key, input.name, ctx.now + lifetime * 60_000),
-    shareWith: shares.map((u) => u.login),
+    shareWith: shares.map((u) => u.display_name ?? u.login),
   };
 }
 
@@ -295,7 +298,10 @@ export type ListedStatus = "uploading" | "ready" | "gone";
 
 export interface Account {
   id: number;
+  /** The shown name: the display name if the account chose one, else its GitHub login. */
   login: string;
+  /** True when the account chose a display name, so its GitHub avatar is not shown. */
+  aliased?: boolean;
 }
 
 export interface ListedFileView {
@@ -350,7 +356,7 @@ export async function listFiles(ctx: FilesContext, caller: Caller): Promise<File
   const byFile = new Map<string, Account[]>();
   for (const s of shares) {
     const list = byFile.get(s.file_id) ?? [];
-    list.push({ id: s.user_id, login: s.login });
+    list.push({ id: s.user_id, login: s.login, aliased: s.aliased === 1 });
     byFile.set(s.file_id, list);
   }
   const listing: FileListing = { files: [], unknown: [] };
@@ -383,7 +389,7 @@ export async function fileDetails(
     throw new ReefError(404, `No file ${fileId} that you own or are shared on.`);
   return fileView(
     file,
-    shares.map((s) => ({ id: s.user_id, login: s.login })),
+    shares.map((s) => ({ id: s.user_id, login: s.login, aliased: s.aliased === 1 })),
     ctx.now,
   );
 }
@@ -409,12 +415,9 @@ export async function shareFile(
     throw new ReefError(403, "Only the file's owner can change its share list.");
   if (file.state === "deleted") throw new ReefError(410, "The file has expired or been deleted.");
   const db = ctx.env.DB;
-  const toAdd = await resolveAccounts(
-    db,
-    uniqueLogins(add).filter((l) => l.toLowerCase() !== caller.login.toLowerCase()),
-  );
-  const toRemove = await accountsByLogin(db, uniqueLogins(remove), true);
-  const removeIds = new Set(toRemove.map((u) => u.id));
+  const toAdd = await resolveAccounts(db, caller, uniqueLogins(add));
+  const toRemove = await accountsByName(db, uniqueLogins(remove), true);
+  const removeIds = new Set([...toRemove.values()].map((u) => u.id));
   const current = new Set(await shareUserIds(db, file.id));
   for (const id of removeIds) current.delete(id);
   for (const u of toAdd) current.add(u.id);

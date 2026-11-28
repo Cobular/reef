@@ -268,9 +268,9 @@ ${
   room
     ? html`<section class="card" aria-labelledby="invite-title"><h2 id="invite-title">Invite</h2>
 <form method="post" action="${base}/invite">${csrfField(p.csrf)}
-<label for="invite-logins" class="sr-only">GitHub logins to invite</label>
+<label for="invite-logins" class="sr-only">GitHub logins or display names to invite</label>
 <div class="inline-form"><div><input type="text" id="invite-logins" name="logins" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="invite-hint">
-<p class="hint" id="invite-hint">GitHub logins, separated by spaces or commas.</p></div>
+<p class="hint" id="invite-hint">GitHub logins or Reef display names, separated by spaces or commas.</p></div>
 <button type="submit" class="btn">Invite</button></div>
 </form></section>`
     : ""
@@ -478,7 +478,7 @@ export async function schoolAction(
       case "invite": {
         const logins = loginList(form.get("logins"));
         if (logins.length === 0) {
-          note = "Type at least one GitHub login to invite.";
+          note = "Type at least one GitHub login or display name to invite.";
           kind = "error";
           break;
         }

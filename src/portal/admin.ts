@@ -44,7 +44,9 @@ ${
 <div class="table-wrap"><table><thead><tr><th scope="col">Login</th><th scope="col">Joined</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${users.map(
     (
       u,
-    ) => html`<tr><td>${avatar({ id: u.id, login: u.login }, true)} <span class="mono">${u.login}</span></td>
+    ) => html`<tr><td>${avatar({ id: u.id, login: u.login }, true)} <span class="mono">${u.login}</span>${
+      u.display_name ? html` <span class="small muted">shown as ${u.display_name}</span>` : ""
+    }</td>
 <td>${timeEl(u.created_at, p.now)}</td>
 <td>${u.banned ? pill("banned") : pill("ready", "Active")}</td>
 <td>${

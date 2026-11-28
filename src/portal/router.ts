@@ -5,7 +5,7 @@ import { rateLimited } from "../guard";
 import { redirect, safeNext, text } from "../lib/http";
 import { logError } from "../lib/log";
 import { overLimit } from "../lib/rate-limit";
-import { accountPage, deleteAccountFromPortal } from "./account";
+import { accountPage, deleteAccountFromPortal, displayNameFromPortal } from "./account";
 import { ADMIN_ACTIONS, type AdminAction, adminAction, adminPage } from "./admin";
 import { serveAsset, serveFaviconIco } from "./assets";
 import { formCsrfOk, type Portal, portalContext, readForm, type SignedIn } from "./context";
@@ -166,6 +166,7 @@ async function signedIn(p: SignedIn, oauth: GrantRevoker): Promise<Response> {
 
   if (path === "/account" && get) return accountPage(p);
   if (path === "/account/delete" && post) return deleteAccountFromPortal(p, oauth);
+  if (path === "/account/name" && post) return displayNameFromPortal(p);
 
   // Not admins get the same 404 as any unknown page.
   if (p.admin) {

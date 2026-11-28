@@ -1,5 +1,12 @@
 import { DAY_MS, MAX_NEW_ACCOUNTS_PER_DAY, signupMode, utcDay } from "../config";
-import { getUser, insertUser, insertUserCapped, isInvited, updateUserLogin } from "../files/repo";
+import {
+  getUser,
+  insertUser,
+  insertUserCapped,
+  isInvited,
+  releaseDisplayName,
+  updateUserLogin,
+} from "../files/repo";
 import { html, page } from "../lib/html";
 import { logEvent } from "../lib/log";
 import type { GitHubUser } from "./github";
@@ -25,7 +32,10 @@ export async function admit(env: Env, gh: GitHubUser, now = Date.now()): Promise
       logEvent("auth.refused", { user: gh.id, reason: "banned" });
       return { ok: false, reason: "banned", login: gh.login };
     }
-    if (existing.login !== gh.login) await updateUserLogin(db, gh.id, gh.login);
+    if (existing.login !== gh.login) {
+      await updateUserLogin(db, gh.id, gh.login);
+      await releaseDisplayName(db, gh.id, gh.login);
+    }
     return { ok: true, userId: gh.id, login: gh.login, created: false };
   }
   const invited = await isInvited(db, gh.login);
@@ -51,6 +61,7 @@ export async function admit(env: Env, gh: GitHubUser, now = Date.now()): Promise
       return { ok: false, reason: "full", login: gh.login, retryAt: dayStart + DAY_MS };
     }
   }
+  await releaseDisplayName(db, gh.id, gh.login);
   logEvent("auth.signup", { user: gh.id, invited });
   return { ok: true, userId: gh.id, login: gh.login, created: true };
 }

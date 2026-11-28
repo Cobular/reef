@@ -1,4 +1,5 @@
 import type { SessionType } from "../config";
+import { aliased, shownName } from "../files/repo";
 
 export type SchoolKind = "pair" | "group";
 
@@ -38,7 +39,9 @@ export interface MessageRow {
   school_id: string;
   seq: number;
   sender_id: number;
+  /** The sender's shown name (display name or login). */
   sender_login: string;
+  sender_aliased: number;
   session_type: SenderType;
   product: string;
   label: string;
@@ -60,8 +63,8 @@ export interface MessageRow {
  * Selects messages `m` with the sender's login and the replied-to message's sender. The parent
  * join is on the messages primary key: one seek per message, inside the same query.
  */
-const MESSAGE_SELECT = `SELECT m.*, u.login AS sender_login,
-    p.sender_id AS reply_sender_id, pu.login AS reply_sender_login,
+const MESSAGE_SELECT = `SELECT m.*, ${shownName("u")} AS sender_login, ${aliased("u")} AS sender_aliased,
+    p.sender_id AS reply_sender_id, ${shownName("pu")} AS reply_sender_login,
     p.session_type AS reply_session_type, p.product AS reply_product, p.label AS reply_label
   FROM messages m JOIN users u ON u.id = m.sender_id
   LEFT JOIN messages p ON p.school_id = m.school_id AND p.seq = m.reply_to
@@ -310,7 +313,9 @@ export interface ListedMembershipRow extends MembershipRow {
 export interface MemberRow {
   school_id: string;
   user_id: number;
+  /** The member's shown name (display name or login). */
   login: string;
+  aliased: number;
   accepted: number;
 }
 
@@ -330,7 +335,7 @@ export async function listMemberships(
         `SELECT l.*,
            CASE WHEN l.accepted = 1 THEN ${unreadAfter("l.id", "l.read_seq")} ELSE 0 END AS unread
          FROM (
-           SELECT sc.*, sm.accepted, sm.session_types, cu.login AS created_by_login,
+           SELECT sc.*, sm.accepted, sm.session_types, ${shownName("cu")} AS created_by_login,
              (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
                AS last_message_at,
              CASE WHEN sm.accepted = 1 THEN sm.portal_read_seq ELSE 0 END AS read_seq
@@ -344,10 +349,11 @@ export async function listMemberships(
       .bind(userId),
     db
       .prepare(
-        `SELECT sm.school_id, sm.user_id, u.login, sm.accepted FROM school_members sm
+        `SELECT sm.school_id, sm.user_id, ${shownName("u")} AS login, ${aliased("u")} AS aliased,
+           sm.accepted FROM school_members sm
          JOIN users u ON u.id = sm.user_id
          WHERE sm.school_id IN (SELECT school_id FROM school_members WHERE user_id = ?1)
-         ORDER BY u.login COLLATE NOCASE`,
+         ORDER BY 3 COLLATE NOCASE`,
       )
       .bind(userId),
   ]);
@@ -751,10 +757,10 @@ export async function attachmentContext(
       .bind(...fileIds),
     db
       .prepare(
-        `SELECT sm.user_id, u.login, sm.accepted FROM school_members sm
+        `SELECT sm.user_id, ${shownName("u")} AS login, sm.accepted FROM school_members sm
            JOIN users u ON u.id = sm.user_id
            WHERE sm.school_id = ?
-           ORDER BY u.login COLLATE NOCASE`,
+           ORDER BY 2 COLLATE NOCASE`,
       )
       .bind(schoolId),
   ]);

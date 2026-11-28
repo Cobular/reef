@@ -92,8 +92,8 @@ describe("creating and running schools", () => {
     const listed = await listSchoolsFor(ctx(), alice.userId);
     const dm = listed.find((s) => s.id === pair.school.id);
     expect(dm?.members).toEqual([
-      { id: alice.userId, login: "alice", accepted: true },
-      { id: bob.userId, login: "bob", accepted: false },
+      { id: alice.userId, login: "alice", aliased: false, accepted: true },
+      { id: bob.userId, login: "bob", aliased: false, accepted: false },
     ]);
     const invite = (await listSchoolsFor(ctx(), bob.userId))[0];
     expect(invite).toMatchObject({ id: pair.school.id, accepted: false, createdBy: "alice" });

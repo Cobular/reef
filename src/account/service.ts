@@ -1,5 +1,5 @@
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
-import { getUser, refreshServiceStats } from "../files/repo";
+import { getUser, refreshServiceStats, setDisplayName } from "../files/repo";
 import { Storage } from "../files/storage";
 import { logEvent } from "../lib/log";
 
@@ -110,4 +110,34 @@ async function revokeGrants(oauth: GrantRevoker, userId: string): Promise<number
     cursor = page.cursor;
   } while (cursor);
   return count;
+}
+
+/** A display name: like a GitHub login, 1 to 39 letters, digits, '-', '_' or '.', no spaces. */
+const DISPLAY_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,37}[A-Za-z0-9])?$/;
+
+export type DisplayNameResult = { ok: true; name: string | null } | { ok: false; error: string };
+
+/**
+ * Sets the account's display name, or clears it when `raw` is blank. Refuses names in the wrong
+ * shape and names that are another account's GitHub login or display name.
+ */
+export async function changeDisplayName(
+  db: D1Database,
+  userId: number,
+  raw: string,
+): Promise<DisplayNameResult> {
+  const name = raw.trim().replace(/^@/, "");
+  if (name === "") {
+    await setDisplayName(db, userId, null);
+    return { ok: true, name: null };
+  }
+  if (!DISPLAY_NAME.test(name))
+    return {
+      ok: false,
+      error:
+        "Use 1 to 39 letters, digits, hyphens, underscores or dots, starting and ending with a letter or digit.",
+    };
+  if (!(await setDisplayName(db, userId, name)))
+    return { ok: false, error: "That name is taken by another Reef account. Choose another." };
+  return { ok: true, name };
 }

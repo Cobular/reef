@@ -71,7 +71,7 @@ ${
 <div class="inline-form"><div><input type="text" id="add" name="add" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="add-hint add-error"${
     error ? html` aria-invalid="true"` : ""
   }>
-<p class="hint" id="add-hint">GitHub logins, separated by spaces or commas.</p>
+<p class="hint" id="add-hint">GitHub logins or Reef display names, separated by spaces or commas.</p>
 ${fieldError("add-error", error ?? null)}</div>
 <button type="submit" class="btn">Add</button></div>
 </form>
@@ -222,7 +222,10 @@ export async function shareFromPortal(p: SignedIn, id: string): Promise<Response
   if (add.length === 0 && remove.length === 0) {
     const view = await loadView(p, id);
     if (!view || view.status === "gone") return swumOff(p, view?.file.expires_at ?? null);
-    return detailPage(p, view, { share: "Type at least one GitHub login to add.", status: 400 });
+    return detailPage(p, view, {
+      share: "Type at least one GitHub login or display name to add.",
+      status: 400,
+    });
   }
   try {
     await shareFile(filesContext(p.env, p.partSize, p.now), p.user, id, add, remove);

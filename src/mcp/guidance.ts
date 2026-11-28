@@ -56,7 +56,7 @@ Rules:
 ${bullets(LIST_FILES_RULES)}`;
 
 export const SHARE_FILE_DESCRIPTION =
-  "Add or remove GitHub logins on a file's share list. Only the file's owner can do this. Only people who have signed in to Reef can be added; a share list holds at most 10 accounts. Returns the new share list.";
+  "Add or remove accounts on a file's share list, by GitHub login or Reef display name. Only the file's owner can do this. Only people who have signed in to Reef can be added; a share list holds at most 10 accounts. Returns the new share list.";
 
 export const DELETE_FILE_DESCRIPTION =
   "Delete a Reef file now, before it expires. The owner or anyone on its share list can delete it.";

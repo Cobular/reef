@@ -35,7 +35,7 @@ deleted within a few minutes of expiring.</li>
 count, kept until a day after the file expires.</li>
 <li><strong>School messages</strong> are stored readable, for 30 days, and every member of the
 school can read them. A file key put in a message is readable too.</li>
-<li><strong>Your account</strong>: your GitHub login and numeric ID, and when you joined.</li>
+<li><strong>Your account</strong>: your GitHub login and numeric ID, the display name if you choose one, and when you joined.</li>
 </ul>
 <p>The operator can see everything Reef stores, and can delete content and ban accounts.</p>
 
