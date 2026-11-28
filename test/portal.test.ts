@@ -565,7 +565,7 @@ describe("schools", () => {
     expect(read.messages.map((m) => m.text)).toEqual(["third"]);
   });
 
-  it("clears a school's unread badge once the person views it, without touching sessions", async () => {
+  it("keeps the unread badge as the person's own tracker, apart from their sessions", async () => {
     const ctx = schoolsContext(workerEnv);
     const school = await createSchool(ctx, bob.userId, "dm", "pair", ["Cobular"]);
     const id = school.school.id;
@@ -577,6 +577,11 @@ describe("schools", () => {
     await sendMessage(ctx, bob.userId, bobSession, id, "one");
     await sendMessage(ctx, bob.userId, bobSession, id, "two");
     const badge = (page: string) => page.match(/class="badge" title="(\d+) unread"/)?.[1] ?? null;
+    expect(badge(await (await get("/schools", admin)).text())).toBe("2");
+    // An agent session reading doesn't clear the person's badge: it is their own tracker.
+    const other = (await joinSession(ctx, admin.userId, "persistent_agent", "duet", "claude-duet"))
+      .handle;
+    await readMessages(ctx, admin.userId, other, id);
     expect(badge(await (await get("/schools", admin)).text())).toBe("2");
 
     // Viewing the school in the portal clears the badge, and reloading writes nothing new.

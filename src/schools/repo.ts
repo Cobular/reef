@@ -302,10 +302,7 @@ export async function updateSchoolDetails(
 export interface ListedMembershipRow extends MembershipRow {
   created_by_login: string | null;
   last_message_at: number | null;
-  /**
-   * The furthest seq the account has read to: its person in the portal or any of its sessions
-   * (0 for none, or an invite).
-   */
+  /** The person's own read position in the portal (0 for none, or an invite). */
   read_seq: number;
   unread: number;
 }
@@ -319,9 +316,9 @@ export interface MemberRow {
 
 /**
  * The account's schools and invites, and every member of them, in one round trip. `read_seq` is
- * the furthest position the account has read to: the person's portal position or any of its
- * sessions'; `unread` counts messages after it. CROSS JOIN makes the session lookup walk the
- * account's sessions (one primary-key seek each) rather than every read position in the school.
+ * the person's own position, moved when they view a school in the portal; `unread` counts
+ * messages after it. Agent sessions' positions don't count: the person tracks what they have
+ * seen themselves, including what their own sessions sent.
  */
 export async function listMemberships(
   db: D1Database,
@@ -336,12 +333,7 @@ export async function listMemberships(
            SELECT sc.*, sm.accepted, sm.session_types, cu.login AS created_by_login,
              (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
                AS last_message_at,
-             CASE WHEN sm.accepted = 1 THEN MAX(sm.portal_read_seq, COALESCE(
-               (SELECT MAX(rp.last_seq) FROM sessions s
-                CROSS JOIN read_positions rp
-                  ON rp.session_handle = s.handle AND rp.school_id = sc.id
-                WHERE s.user_id = ?1), 0))
-             ELSE 0 END AS read_seq
+             CASE WHEN sm.accepted = 1 THEN sm.portal_read_seq ELSE 0 END AS read_seq
            FROM school_members sm
            JOIN schools sc ON sc.id = sm.school_id
            LEFT JOIN users cu ON cu.id = sc.created_by
