@@ -8,6 +8,7 @@ import {
   leaveSchool,
   listSchoolsFor,
   type MessageView,
+  markSeenInPortal,
   pauseSchool,
   resumeSchool,
   type SchoolListing,
@@ -332,6 +333,11 @@ export async function schoolPage(
     (m) => m.seq > school.readSeq && !(m.person && m.sender.id === p.user.userId),
   );
   const divider = firstNew > 0 || (firstNew === 0 && page.nextBefore === null) ? firstNew : -1;
+  // Viewing the newest page marks it seen for this person (not for their sessions), so the
+  // Schools badge clears. The divider above still uses the position from before this view.
+  const newest = messages[messages.length - 1];
+  if (before === undefined && newest && newest.seq > school.readSeq)
+    await markSeenInPortal(schoolsContext(p.env, p.now), p.user.userId, school.id, newest.seq);
   const body = html`<p class="small"><a href="/schools">← Schools</a></p>
 ${
   school.paused

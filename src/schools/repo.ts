@@ -302,7 +302,10 @@ export async function updateSchoolDetails(
 export interface ListedMembershipRow extends MembershipRow {
   created_by_login: string | null;
   last_message_at: number | null;
-  /** The furthest seq any of the account's sessions has read to (0 for none, or an invite). */
+  /**
+   * The furthest seq the account has read to: its person in the portal or any of its sessions
+   * (0 for none, or an invite).
+   */
   read_seq: number;
   unread: number;
 }
@@ -316,9 +319,9 @@ export interface MemberRow {
 
 /**
  * The account's schools and invites, and every member of them, in one round trip. `read_seq` is
- * the furthest position any of the account's sessions has read to; `unread` counts messages
- * after it. CROSS JOIN makes that lookup walk the account's sessions (one primary-key seek
- * each) rather than every read position in the school.
+ * the furthest position the account has read to: the person's portal position or any of its
+ * sessions'; `unread` counts messages after it. CROSS JOIN makes the session lookup walk the
+ * account's sessions (one primary-key seek each) rather than every read position in the school.
  */
 export async function listMemberships(
   db: D1Database,
@@ -333,11 +336,11 @@ export async function listMemberships(
            SELECT sc.*, sm.accepted, sm.session_types, cu.login AS created_by_login,
              (SELECT created_at FROM messages WHERE school_id = sc.id ORDER BY seq DESC LIMIT 1)
                AS last_message_at,
-             CASE WHEN sm.accepted = 1 THEN COALESCE(
+             CASE WHEN sm.accepted = 1 THEN MAX(sm.portal_read_seq, COALESCE(
                (SELECT MAX(rp.last_seq) FROM sessions s
                 CROSS JOIN read_positions rp
                   ON rp.session_handle = s.handle AND rp.school_id = sc.id
-                WHERE s.user_id = ?1), 0)
+                WHERE s.user_id = ?1), 0))
              ELSE 0 END AS read_seq
            FROM school_members sm
            JOIN schools sc ON sc.id = sm.school_id
@@ -614,6 +617,25 @@ export async function moveReadPosition(
        ON CONFLICT (session_handle, school_id) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)`,
     )
     .bind(handle, schoolId, seq)
+    .run();
+}
+
+/**
+ * Moves the person's portal read position forward to `seq` (never back). Writes nothing when it
+ * is already there, so reloading a school page costs no write.
+ */
+export async function movePortalReadPosition(
+  db: D1Database,
+  schoolId: string,
+  userId: number,
+  seq: number,
+) {
+  await db
+    .prepare(
+      `UPDATE school_members SET portal_read_seq = ?3
+       WHERE school_id = ?1 AND user_id = ?2 AND accepted = 1 AND portal_read_seq < ?3`,
+    )
+    .bind(schoolId, userId, seq)
     .run();
 }
 
