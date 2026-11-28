@@ -326,8 +326,8 @@ export async function schoolPage(
     canReply: !school.paused,
   };
   const reply = replySeq !== undefined ? { seq: replySeq, target: page.replyTarget } : null;
-  // The divider sits before the first message no session of this account has read, skipping
-  // what this person wrote in the portal. If that is the first message on a page with earlier
+  // The divider sits before the first message this person hasn't seen in the portal, skipping
+  // what they wrote there. If that is the first message on a page with earlier
   // ones, the boundary is further back, so skip it.
   const firstNew = messages.findIndex(
     (m) => m.seq > school.readSeq && !(m.person && m.sender.id === p.user.userId),

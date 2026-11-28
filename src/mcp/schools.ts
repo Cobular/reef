@@ -243,7 +243,7 @@ function listingLine(s: SchoolListing): string {
   );
   if (s.accepted) {
     parts.push(`last message: ${s.lastMessageAt === null ? "none" : utc(s.lastMessageAt)}`);
-    parts.push(`${s.unread} unread`);
+    parts.push(`${s.unread} unread by your user in the portal`);
   }
   return parts.join("; ");
 }

@@ -13,6 +13,7 @@ import {
   joinSession,
   leaveSchool,
   listSchoolsFor,
+  markSeenInPortal,
   pauseSchool,
   readHistory,
   readMessages,
@@ -283,7 +284,7 @@ describe("creating and running schools", () => {
     expect(outsider.message).toBe(missing.message.replace("nosuchschool", id));
   });
 
-  it("lists last message time and account-wide unread counts", async () => {
+  it("lists last message time and the person's own unread count", async () => {
     const id = await group(bob);
     const ha = await join(alice);
     const hb = await join(bob);
@@ -291,8 +292,17 @@ describe("creating and running schools", () => {
     await sendMessage(ctx(2_000_000), alice.userId, ha, id, "two");
     const before = (await listSchoolsFor(ctx(), bob.userId))[0];
     expect(before).toMatchObject({ lastMessageAt: 2_000_000, unread: 2 });
-    await readMessages(ctx(), bob.userId, hb, id, 1);
-    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(1);
+    // A session reading doesn't count for the person...
+    await readMessages(ctx(), bob.userId, hb, id);
+    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(2);
+    // ...and messages the person's own sessions sent are still theirs to review.
+    expect((await listSchoolsFor(ctx(), alice.userId))[0]?.unread).toBe(2);
+    await markSeenInPortal(ctx(), bob.userId, id, 1);
+    expect((await listSchoolsFor(ctx(), bob.userId))[0]).toMatchObject({ readSeq: 1, unread: 1 });
+    // The position only moves forward, and the session's own count is untouched.
+    await markSeenInPortal(ctx(), bob.userId, id, 0);
+    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.readSeq).toBe(1);
+    expect((await checkUnread(ctx(), bob.userId, hb)).any).toBe(false);
   });
 });
 
@@ -802,15 +812,16 @@ describe("school cleanup", () => {
     expect((await checkUnread(ctx(), bob.userId, hb)).schools[0]?.unread).toBe(2);
     const fresh = await join(bob, "fresh");
     expect((await checkUnread(ctx(), bob.userId, fresh)).schools[0]?.unread).toBe(2);
+    // The person's position (0) is inside the deleted range too.
     expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(2);
 
     const page = await readMessages(ctx(), bob.userId, hb, id, 1);
     expect(page.messages.map((m) => m.text)).toEqual(["n4"]);
     expect(page.remaining).toBe(1);
     expect((await checkUnread(ctx(), bob.userId, hb)).schools[0]?.unread).toBe(1);
-    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(1);
     expect((await checkUnread(ctx(), alice.userId, ha)).any).toBe(false);
-    expect((await listSchoolsFor(ctx(), alice.userId))[0]?.unread).toBe(0);
+    await markSeenInPortal(ctx(), bob.userId, id, 4);
+    expect((await listSchoolsFor(ctx(), bob.userId))[0]?.unread).toBe(1);
   });
 
   it("keeps seqs above old read positions after retention empties a school", async () => {
