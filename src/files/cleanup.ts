@@ -1,4 +1,4 @@
-import { ROW_RETENTION_MS, UPLOAD_TOKEN_TTL_MS } from "../config";
+import { ROW_RETENTION_MS, UNSTARTED_UPLOAD_MS, UPLOAD_TOKEN_TTL_MS, utcDay } from "../config";
 import { logEvent } from "../lib/log";
 import { markDeleted, refreshServiceStats } from "./repo";
 import { Storage } from "./storage";
@@ -16,7 +16,8 @@ export interface CleanupResult {
 
 /**
  * The 5-minute cron job (DESIGN.md "Expiry"): delete expired objects, abort uploads that never
- * finished, mark their rows deleted, and purge rows (and part receipts) 24 hours after expiry.
+ * finished (or never started sending within UNSTARTED_UPLOAD_MS), mark their rows deleted, purge
+ * rows (and part receipts) 24 hours after expiry, and drop past days' upload and signup counters.
  */
 export async function cleanup(env: Env, now = Date.now()): Promise<CleanupResult> {
   const db = env.DB;
@@ -37,10 +38,12 @@ export async function cleanup(env: Env, now = Date.now()): Promise<CleanupResult
   const stale = await db
     .prepare(
       // Pending rows are only the uploads in flight, so the (state, expires_at) index's state
-      // prefix is enough; no index on created_at is kept for this.
-      "SELECT id, r2_upload_id FROM files WHERE state = 'pending' AND created_at <= ? LIMIT ?",
+      // prefix is enough; no index on created_at is kept for this. An upload whose bytes never
+      // started goes after UNSTARTED_UPLOAD_MS; one that started gets until its token expires.
+      `SELECT id, r2_upload_id FROM files WHERE state = 'pending'
+         AND (created_at <= ? OR (upload_started_at IS NULL AND created_at <= ?)) LIMIT ?`,
     )
-    .bind(now - STALE_UPLOAD_MS, BATCH)
+    .bind(now - STALE_UPLOAD_MS, now - UNSTARTED_UPLOAD_MS, BATCH)
     .all<{ id: string; r2_upload_id: string | null }>();
   for (const row of stale.results) {
     if (row.r2_upload_id) await storage.abortMultipart(row.id, row.r2_upload_id);
@@ -65,6 +68,10 @@ export async function cleanup(env: Env, now = Date.now()): Promise<CleanupResult
     // After the purge: serviceResidentBytes relies on no file row being deleted between two
     // refreshes.
     refreshServiceStats(db),
+    // Daily counters for days already over. They have no foreign keys, so account deletion
+    // leaves them.
+    db.prepare("DELETE FROM uploads_started WHERE day < ?").bind(utcDay(now)),
+    db.prepare("DELETE FROM signups_daily WHERE day < ?").bind(utcDay(now)),
   ]);
   const result = {
     expired: expiredIds.length,

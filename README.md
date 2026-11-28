@@ -64,7 +64,8 @@ The sample data has files with plenty of time left, one minute left, one still u
 expired; a school just for your sessions; a pair with a dozen messages (4 unread, an attachment
 and a long one); and a pending invitation. Re-run the `seed-local.sql` line to reset it, timers
 included. Seeded files have no stored content, so their downloads fail; upload a real file at
-`/files/new` to try a download. Admin pages show for the logins in `ADMINS` (`wrangler.jsonc`).
+`/files/new` to try a download. Admin pages show for the GitHub user IDs in `ADMINS`
+(`wrangler.jsonc`).
 
 Checks (the same ones CI runs):
 
@@ -119,8 +120,9 @@ R2 accepts SSE-C keys but ignores them, so the tests emulate SSE-C at the storag
 ## Accounts
 
 With `SIGNUP_MODE=invite` (the default), only GitHub logins in `invites` can create an account.
-Logins match case-insensitively. Admins (the comma-separated GitHub logins in the `ADMINS` var
-in `wrangler.jsonc`) manage invites, bans and file removal at `/admin` in the portal. The same
+Logins match case-insensitively. Admins (the comma-separated numeric GitHub user IDs in the
+`ADMINS` var in `wrangler.jsonc`; `gh api users/<login> --jq .id` prints one) manage invites,
+bans and file removal at `/admin` in the portal. The same
 changes from the command line:
 
 ```sh

@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
 import { RATE_LIMITS } from "../config";
-import { utc } from "../files/commands";
+import { quoted, utc } from "../files/commands";
 import { getUser } from "../files/repo";
 import {
   type Caller,
@@ -24,6 +24,7 @@ import {
   GET_DOWNLOAD_DESCRIPTION,
   GET_DOWNLOAD_RULES,
   LIST_FILES_DESCRIPTION,
+  LIST_FILES_RULES,
   SERVER_INSTRUCTIONS,
   SHARE_FILE_DESCRIPTION,
 } from "./guidance";
@@ -111,7 +112,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
         const c = ctx();
         const up = await createUpload(c, caller, input);
         const lines = [
-          `File ${up.file.id} is ready to receive ${up.file.name}, ${sizeText(up.file.size)}.`,
+          `File ${up.file.id} is ready to receive ${quoted(up.file.name)}, ${sizeText(up.file.size)}.`,
           `Lifetime: ${up.file.lifetime_minutes} minutes after the upload finishes.`,
           `Download limit: ${up.file.download_limit ?? "none"}.`,
           `Shared with: ${up.shareWith.length > 0 ? up.shareWith.join(", ") : "nobody else yet (use share_file)"}.`,
@@ -126,7 +127,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
         }
         lines.push(
           "",
-          "The upload link works for 30 minutes. When it finishes it prints the exact expiry time.",
+          "Run it now: an upload that hasn't started sending within 5 minutes is cancelled. Once started, the upload link works for 30 minutes. When it finishes it prints the exact expiry time.",
           "",
           `Key: ${up.key}`,
           "",
@@ -154,7 +155,9 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
         const grant = await getDownload(c, caller, file_id);
         const minutes = Math.max(0, Math.ceil((grant.expiresAt - c.now) / 60_000));
         return [
-          `${grant.file.name}, ${sizeText(grant.file.size)}.`,
+          `File ${quoted(grant.file.name)}, ${sizeText(grant.file.size)}, from ${
+            grant.otherOwner === null ? "your account" : `${grant.otherOwner} (another account)`
+          }.`,
           `Expires ${utc(grant.expiresAt)} (about ${minutes} minutes left).`,
           `Downloads left: ${grant.downloadsLeft ?? "unlimited"}.`,
           "",
@@ -178,13 +181,13 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     () =>
       run("list_files", async () => {
         const c = ctx();
-        const files = await listFiles(c, caller);
-        if (files.length === 0)
-          return "You have no Reef files, and none expired in the last 24 hours.";
+        const { files, unknown } = await listFiles(c, caller);
         const lines = files.map((f) => {
           const parts = [
-            `${f.file.id}  ${f.file.name}  ${sizeText(f.file.size)}`,
-            `owner ${f.file.owner_login}`,
+            `${f.file.id}  ${quoted(f.file.name)}  ${sizeText(f.file.size)}`,
+            f.file.owner_id === caller.userId
+              ? "owner you"
+              : `owner ${f.file.owner_login} (another account)`,
           ];
           if (f.status === "ready") parts.push(`ready, ${f.minutesLeft} minutes left`);
           else if (f.status === "uploading") parts.push("upload not finished");
@@ -193,7 +196,17 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
           parts.push(`shared with: ${f.shares.length > 0 ? f.shares.join(", ") : "nobody"}`);
           return `- ${parts.join("; ")}`;
         });
-        return [`${files.length} file(s):`, ...lines].join("\n");
+        const out =
+          files.length > 0
+            ? [`${files.length} file(s):`, ...lines]
+            : ["You have no Reef files, and none expired in the last 24 hours."];
+        if (unknown.length > 0)
+          out.push(
+            "",
+            `Not listed: ${unknown.length} file(s) shared with you by accounts you share no school with. Your user can see them in the Reef portal.`,
+          );
+        out.push("", "Rules:", bullets(LIST_FILES_RULES));
+        return out.join("\n");
       }),
   );
 
@@ -209,8 +222,8 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
       run("share_file", async () => {
         const result = await shareFile(ctx(), caller, file_id, add ?? [], remove ?? []);
         return result.shares.length > 0
-          ? `${result.file.name} (${result.file.id}) is shared with: ${result.shares.join(", ")}.`
-          : `${result.file.name} (${result.file.id}) is shared with nobody else.`;
+          ? `${quoted(result.file.name)} (${result.file.id}) is shared with: ${result.shares.join(", ")}.`
+          : `${quoted(result.file.name)} (${result.file.id}) is shared with nobody else.`;
       }),
   );
 
@@ -225,7 +238,7 @@ export function buildServer(env: Env, caller: Caller, partSize: number): McpServ
     ({ file_id }) =>
       run("delete_file", async () => {
         const file = await deleteFile(ctx(), caller, file_id);
-        return `Deleted ${file.name} (${file.id}). Nobody can download it now.`;
+        return `Deleted ${quoted(file.name)} (${file.id}). Nobody can download it now.`;
       }),
   );
 

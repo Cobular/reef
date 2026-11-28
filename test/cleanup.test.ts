@@ -1,7 +1,9 @@
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { UNSTARTED_UPLOAD_MS } from "../src/config";
 import { cleanup, STALE_UPLOAD_MS } from "../src/files/cleanup";
+import { markUploadStarted } from "../src/files/repo";
 import { createUpload, filesContext } from "../src/files/service";
 import { objectKey } from "../src/files/storage";
 import { addUser, fileRow, resetDb, TEST_PART_SIZE, testEnv, testWorker } from "./helpers";
@@ -53,6 +55,19 @@ describe("cron cleanup", () => {
     const recent = await createUpload(ctx, alice, { name: "recent", size: 1 });
     await cleanup(testEnv(), Date.now());
     expect((await fileRow(recent.file.id))?.state).toBe("pending");
+  });
+
+  it("sweeps an upload that never started sending after a few minutes", async () => {
+    const ctx = filesContext(testEnv(), TEST_PART_SIZE);
+    const idle = await createUpload(ctx, alice, { name: "idle", size: 1 });
+    const started = await createUpload(ctx, alice, { name: "started", size: 1 });
+    await markUploadStarted(env.DB, started.file.id, Date.now());
+    await cleanup(testEnv(), Date.now() + UNSTARTED_UPLOAD_MS - 1000);
+    expect((await fileRow(idle.file.id))?.state).toBe("pending");
+    const result = await cleanup(testEnv(), Date.now() + UNSTARTED_UPLOAD_MS + 1000);
+    expect(result.abandoned).toBe(1);
+    expect((await fileRow(idle.file.id))?.state).toBe("deleted");
+    expect((await fileRow(started.file.id))?.state).toBe("pending");
   });
 
   it("purges rows and their share lists 24 hours after expiry", async () => {

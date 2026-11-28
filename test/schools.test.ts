@@ -108,6 +108,10 @@ describe("creating and running schools", () => {
       (await refusal(createSchool(ctx(), alice.userId, "x", "group", ["mallory", "nobody"])))
         .message,
     ).toContain("mallory, nobody");
+    await addUser(50, "Bob");
+    const ambiguous = await refusal(createSchool(ctx(), alice.userId, "x", "group", ["bob"]));
+    expect(ambiguous.status).toBe(409);
+    expect(ambiguous.message).toContain("More than one Reef account has had the login");
   });
 
   it("caps a group at 20 members, pending invites included", async () => {
@@ -194,8 +198,22 @@ describe("creating and running schools", () => {
       `description must be at most ${max} characters`,
     );
     expect((await refusal(setDescription(alice.userId, "bell\u0007"))).message).toBe(
-      "description must not contain control characters",
+      "description must not contain control or invisible formatting characters",
     );
+    for (const hidden of ["a\u202eb", "a\u2028b", "a\u200bb"]) {
+      expect((await refusal(setDescription(alice.userId, hidden))).message).toContain(
+        "invisible formatting",
+      );
+      expect((await refusal(createSchool(ctx(), alice.userId, hidden, "group"))).message).toContain(
+        "invisible formatting",
+      );
+      expect(
+        (await refusal(joinSession(ctx(), alice.userId, "chat", hidden, "claude-code"))).message,
+      ).toContain("invisible formatting");
+      expect(
+        (await refusal(joinSession(ctx(), alice.userId, "chat", "a", hidden))).message,
+      ).toContain("invisible formatting");
+    }
     expect((await setDescription(alice.userId, "d".repeat(max))).description).toHaveLength(max);
     const both = await updateSchoolDetails(ctx(), alice.userId, id, {
       name: "crew",

@@ -64,6 +64,8 @@ interface MessageLinks {
   oldestSeq: number;
   /** Offer a Reply link (not while the school is paused). */
   canReply: boolean;
+  /** The session's form token, for the attachments' one-click Download buttons. */
+  csrf: string;
 }
 
 /** A link to message `seq`: an in-page anchor, or the earlier page that ends with it. */
@@ -104,7 +106,11 @@ ${
     ? html`<ul class="attach" aria-label="Attachments">${m.attachments.map((a) =>
         a.gone
           ? html`<li><span class="file-chip gone">${icons.file}<span>${a.name ?? "A file"} · file has swum off</span></span></li>`
-          : html`<li><a class="file-chip" href="/files/${a.fileId}">${icons.file}<span class="mono">${a.name ?? a.fileId}</span></a></li>`,
+          : html`<li><a class="file-chip" href="/files/${a.fileId}">${icons.file}<span class="mono">${a.name ?? a.fileId}</span></a>${
+              a.key
+                ? html`<form method="post" action="/files/${a.fileId}/download">${csrfField(links.csrf)}<input type="hidden" name="key" value="${a.key}"><button type="submit" class="btn small quiet">Download<span class="sr-only"> ${a.name ?? a.fileId}</span></button></form>`
+                : ""
+            }</li>`,
       )}</ul>`
     : ""
 }
@@ -324,6 +330,7 @@ export async function schoolPage(
     base,
     oldestSeq: messages[0]?.seq ?? 0,
     canReply: !school.paused,
+    csrf: p.csrf,
   };
   const reply = replySeq !== undefined ? { seq: replySeq, target: page.replyTarget } : null;
   // The divider sits before the first message this person hasn't seen in the portal, skipping

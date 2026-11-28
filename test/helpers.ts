@@ -1,8 +1,11 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { GitHubApi, GitHubUser } from "../src/auth/github";
+import { signValue } from "../src/auth/signed";
+import { SESSION_COOKIE } from "../src/config";
 import { bytesToHex } from "../src/lib/base64";
 import { mcpApiHandler } from "../src/mcp/server";
+import { csrfToken } from "../src/portal/csrf";
 import { createWorker } from "../src/worker";
 
 /** 5 MiB, R2's minimum part size, so multipart tests stay small. */
@@ -179,12 +182,15 @@ export async function resetDb(): Promise<void> {
       "DELETE FROM school_members",
       "DELETE FROM schools",
       "DELETE FROM upload_parts",
+      "DELETE FROM download_receipts",
       "DELETE FROM file_shares",
       "DELETE FROM files",
       "DELETE FROM invites",
       "DELETE FROM users",
       "DELETE FROM service_stats",
       "DELETE FROM school_invites_sent",
+      "DELETE FROM uploads_started",
+      "DELETE FROM signups_daily",
     ].map((sql) => env.DB.prepare(sql)),
   );
 }
@@ -193,6 +199,46 @@ export async function addUser(id: number, login: string, banned = false): Promis
   await env.DB.prepare("INSERT INTO users (id, login, created_at, banned) VALUES (?, ?, ?, ?)")
     .bind(id, login, Date.now(), banned ? 1 : 0)
     .run();
+}
+
+/**
+ * A signed portal session for an account, issued at `iat` (it must be after the account was
+ * created and after any sign-out), and the form token that goes with it.
+ */
+export async function portalSessionFor(
+  userId: number,
+  iat = Date.now(),
+): Promise<{ cookie: string; csrf: string }> {
+  const value = await signValue(
+    env.COOKIE_SECRET,
+    "session",
+    { uid: userId, iat },
+    Date.now() + 3_600_000,
+  );
+  return {
+    cookie: `${SESSION_COOKIE}=${value}`,
+    csrf: await csrfToken(env as unknown as Env, userId, iat),
+  };
+}
+
+/** Puts accounts in a new group school; `accepted` lists the ones who have accepted. */
+export async function schoolWith(
+  members: number[],
+  accepted: number[] = members,
+  id = `s${Math.random().toString(36).slice(2, 10)}`,
+): Promise<string> {
+  const creator = members[0] ?? 0;
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO schools (id, name, kind, created_by, created_at) VALUES (?, 'test', 'group', ?, ?)",
+    ).bind(id, creator, Date.now()),
+    ...members.map((m) =>
+      env.DB.prepare(
+        "INSERT INTO school_members (school_id, user_id, accepted) VALUES (?, ?, ?)",
+      ).bind(id, m, accepted.includes(m) ? 1 : 0),
+    ),
+  ]);
+  return id;
 }
 
 export async function invite(login: string): Promise<void> {

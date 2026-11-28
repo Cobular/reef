@@ -1,9 +1,13 @@
 import { publicOrigin } from "../config";
 import { hmacSign, timingSafeEqualStrings } from "../lib/crypto";
 
-/** The form token for an account: HMAC(COOKIE_SECRET, "csrf:" + userId), 32 base64url chars. */
-export async function csrfToken(env: Env, userId: number): Promise<string> {
-  return (await hmacSign(env.COOKIE_SECRET, `csrf:${userId}`)).slice(0, 32);
+/**
+ * The form token for one portal session: HMAC(COOKIE_SECRET, "csrf:" + userId + ":" + iat), 32
+ * base64url chars. Bound to the session's issue time, so a token seen once stops working when
+ * that session ends.
+ */
+export async function csrfToken(env: Env, userId: number, iat: number): Promise<string> {
+  return (await hmacSign(env.COOKIE_SECRET, `csrf:${userId}:${iat}`)).slice(0, 32);
 }
 
 /**

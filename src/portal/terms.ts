@@ -2,7 +2,7 @@ import { html } from "../lib/html";
 import type { Portal } from "./context";
 import { render } from "./layout";
 
-export const TERMS_UPDATED = "2026-11-23";
+export const TERMS_UPDATED = "2026-11-28";
 
 const ABUSE_FORM = "https://github.com/Cobular/reef/issues/new?template=abuse-report.yml";
 
@@ -41,7 +41,8 @@ school can read them. A file key put in a message is readable too.</li>
 
 <h2>Deleting your account</h2>
 <p>You can delete your account and everything in it at any time, from
-<a href="/account">your account page</a>.</p>
+<a href="/account">your account page</a>. A banned account can’t sign in to do that; its owner
+can ask the operator to delete its data with the <a href="${ABUSE_FORM}">abuse report form</a>.</p>
 
 <h2>Reports</h2>
 <p>Report abuse with the <a href="${ABUSE_FORM}">abuse report form</a>. The operator may delete

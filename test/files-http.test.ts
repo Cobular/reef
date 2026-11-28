@@ -301,6 +301,23 @@ describe("download", () => {
     expect((await get(token, up.key, { Range: "bytes=50-" })).status).toBe(206);
   });
 
+  it("refuses a range past byte 0 from an account that never started a download", async () => {
+    const up = await uploaded(100, { download_limit: 1, share_with: ["bob"] });
+    const bobToken = await downloadToken(up.file.id, bob.userId);
+    for (const range of ["bytes=1-", "bytes=50-99", "bytes=-10"]) {
+      const res = await get(bobToken, up.key, { Range: range });
+      expect(res.status, range).toBe(409);
+    }
+    expect((await fileRow(up.file.id))?.download_count).toBe(0);
+    expect((await get(bobToken, up.key, { Range: "bytes=0-0" })).status).toBe(206);
+    expect((await get(bobToken, up.key, { Range: "bytes=1-" })).status).toBe(206);
+    // Another account's counted download doesn't let this one resume.
+    const carolUp = await uploaded(100, { share_with: ["carol"] });
+    await get(await downloadToken(carolUp.file.id, alice.userId), carolUp.key);
+    const carolToken = await downloadToken(carolUp.file.id, carol.userId);
+    expect((await get(carolToken, carolUp.key, { Range: "bytes=1-" })).status).toBe(409);
+  });
+
   it("answers an unsatisfiable range with 416", async () => {
     const up = await uploaded(100);
     const res = await get(await downloadToken(up.file.id, alice.userId), up.key, {
@@ -336,15 +353,47 @@ describe("download", () => {
 });
 
 describe("quotas", () => {
-  it("caps uploads per day", async () => {
-    const now = Date.now();
-    const insert = env.DB.prepare(
-      "INSERT INTO files (id, owner_id, name, size, state, lifetime_minutes, created_at) VALUES (?, ?, 'x', 1, 'deleted', 10, ?)",
-    );
-    await env.DB.batch(
-      Array.from({ length: 50 }, (_, i) => insert.bind(`old${i}`, alice.userId, now - i)),
-    );
-    await expect(newUpload(1)).rejects.toMatchObject({ status: 429 });
+  it("caps uploads per UTC day, and deleting files doesn't hand the count back", async () => {
+    await env.DB.prepare("INSERT INTO uploads_started (day, user_id, started) VALUES (?, ?, 49)")
+      .bind(Math.floor(Date.now() / 86_400_000), alice.userId)
+      .run();
+    const last = await newUpload(1);
+    await env.DB.prepare("DELETE FROM files WHERE id = ?").bind(last.file.id).run();
+    await expect(newUpload(1)).rejects.toMatchObject({
+      status: 429,
+      message: expect.stringContaining("per UTC day"),
+    });
+    // Yesterday's count doesn't apply.
+    await env.DB.prepare("UPDATE uploads_started SET day = day - 1").run();
+    await expect(newUpload(1)).resolves.toBeTruthy();
+  });
+
+  it("allows two uploads in progress at once", async () => {
+    await newUpload(1);
+    const second = await newUpload(1);
+    await expect(newUpload(1)).rejects.toMatchObject({
+      status: 429,
+      message: expect.stringContaining("in progress"),
+    });
+    const body = bytes(1);
+    expect((await put(`/up/${second.token}`, second.key, body)).status).toBe(200);
+    await expect(newUpload(1)).resolves.toBeTruthy();
+  });
+
+  it("lets only one of several simultaneous uploads take the last bytes of the account", async () => {
+    await env.DB.prepare(
+      "INSERT INTO files (id, owner_id, name, size, state, lifetime_minutes, created_at, expires_at) VALUES ('big', ?, 'x', ?, 'ready', 10, ?, ?)",
+    )
+      .bind(alice.userId, 10 * 1024 ** 3 - 1000, Date.now(), Date.now() + 60_000)
+      .run();
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => newUpload(600)));
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of results.filter((r) => r.status === "rejected"))
+      expect((r as PromiseRejectedResult).reason).toMatchObject({ status: 413 });
+    const pending = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM files WHERE state = 'pending'",
+    ).first("n");
+    expect(pending).toBe(1);
   });
 
   it("caps resident bytes per account", async () => {

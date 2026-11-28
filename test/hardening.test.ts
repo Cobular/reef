@@ -1,19 +1,18 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { signValue } from "../src/auth/signed";
 import { RATE_LIMITS, SESSION_COOKIE } from "../src/config";
 import { cleanup } from "../src/files/cleanup";
 import { createUpload, filesContext, shareFile } from "../src/files/service";
 import { issueToken } from "../src/files/tokens";
 import { mcpApiHandler } from "../src/mcp/server";
-import { csrfToken } from "../src/portal/csrf";
 import wranglerConfig from "../wrangler.jsonc?raw";
 import {
   addUser,
   call,
   fileRow,
   ORIGIN,
+  portalSessionFor,
   type RateLimitBinding,
   readRpc,
   resetDb,
@@ -52,15 +51,15 @@ function upload(size: number, workerEnv = testEnv()) {
 }
 
 async function sessionCookie(userId: number): Promise<string> {
-  const value = await signValue(env.COOKIE_SECRET, "session", { uid: userId }, Date.now() + 60_000);
-  return `${SESSION_COOKIE}=${value}`;
+  return (await portalSessionFor(userId)).cookie;
 }
 
 async function portalPost(path: string, workerEnv: Env, accept?: string): Promise<Response> {
-  const body = new URLSearchParams({ csrf: await csrfToken(workerEnv, alice.userId) });
+  const session = await portalSessionFor(alice.userId);
+  const body = new URLSearchParams({ csrf: session.csrf });
   const headers = new Headers({
     "Content-Type": "application/x-www-form-urlencoded",
-    Cookie: await sessionCookie(alice.userId),
+    Cookie: session.cookie,
     Origin: ORIGIN,
   });
   if (accept) headers.set("Accept", accept);

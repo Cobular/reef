@@ -52,8 +52,8 @@ export async function portalContext(
     url: new URL(request.url),
     now,
     user,
-    csrf: user ? await csrfToken(env, user.userId) : null,
-    admin: user ? isAdmin(env, user.login) : false,
+    csrf: user ? await csrfToken(env, user.userId, user.iat) : null,
+    admin: user ? isAdmin(env, user.userId) : false,
     flash,
     partSize,
   };
