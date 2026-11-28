@@ -584,6 +584,8 @@ export interface JoinedSession {
   /** As `open`, but paused: readable, not sendable. */
   paused: RoutedSchool[];
   pendingInvites: number;
+  /** When the handle was first issued, if this join found an existing one; null if new. */
+  existingSince: number | null;
 }
 
 /**
@@ -601,9 +603,10 @@ export async function joinSession(
     throw new ReefError(400, `type must be one of ${SESSION_TYPES.join(", ")}`);
   const cleanLabel = textField("label", label, SCHOOL_LIMITS.maxLabelLength);
   const cleanProduct = textField("product", product, SCHOOL_LIMITS.maxProductLength);
+  const candidate = randomId(HANDLE_LENGTH);
   const { session, schools, pendingInvites } = await repo.joinSession(
     ctx.db,
-    randomId(HANDLE_LENGTH),
+    candidate,
     actor,
     type,
     cleanProduct,
@@ -624,6 +627,7 @@ export async function joinSession(
     open: schools.filter((s) => s.paused === 0).map(toRef),
     paused: schools.filter((s) => s.paused === 1).map(toRef),
     pendingInvites,
+    existingSince: session.handle === candidate ? null : session.created_at,
   };
 }
 
@@ -702,6 +706,43 @@ export async function readMessages(
     school: { id: row.school_id, name: row.name ?? "", paused: row.paused === 1 },
     messages: messages.map((m) => messageView(m, actor, row)),
     remaining: Math.max(0, result.unread - messages.length),
+  };
+}
+
+export interface HistoryResult {
+  school: { id: string; name: string; paused: boolean };
+  /** Oldest first. */
+  messages: MessageView[];
+  /** Pass as before_seq for the page before this one; null when this page reaches the oldest. */
+  nextBefore: number | null;
+}
+
+/**
+ * Earlier messages in a school, for context: the page of messages before `before` (the newest
+ * page when omitted), returned oldest first. Moves no read position, for this session or any.
+ */
+export async function readHistory(
+  ctx: SchoolsContext,
+  actor: number,
+  handle: string,
+  schoolId: string,
+  options: { before?: number; limit?: number } = {},
+): Promise<HistoryResult> {
+  checkHandle(handle);
+  const count = readLimit(options.limit);
+  if (!ID_PATTERN.test(schoolId)) throw noSuchSchool(schoolId);
+  const before = options.before ?? Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(before) || before < 1)
+    throw new ReefError(400, "before_seq must be a message's seq: a whole number from 1.");
+  // Reads do not use the rate-limit count; `now` makes it count nothing.
+  const context = await repo.getSessionSchool(ctx.db, handle, actor, schoolId, ctx.now, ctx.now);
+  const row = requireSessionSchool(context, handle, schoolId);
+  const { messages: rows } = await repo.messagesBefore(ctx.db, row.school_id, before, count + 1);
+  const page = withinPageBudget(rows.slice(0, count));
+  return {
+    school: { id: row.school_id, name: row.name ?? "", paused: row.paused === 1 },
+    messages: page.map((m) => messageView(m, actor, row)).reverse(),
+    nextBefore: rows.length > page.length ? (page[page.length - 1]?.seq ?? null) : null,
   };
 }
 
