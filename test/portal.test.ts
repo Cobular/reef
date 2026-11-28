@@ -544,9 +544,7 @@ describe("schools", () => {
     expect(body).toContain(`<form method="post" action="/files/${file.file.id}/download">`);
     expect(body).toContain(`<input type="hidden" name="key" value="${file.key}">`);
     expect(body).not.toContain(`href="/files/${file.file.id}?`);
-    expect(body).not.toMatch(
-      new RegExp(`href="[^"]*${file.key.slice(0, 12).replace(/[+/]/g, "\\$&")}`),
-    );
+    expect((body.match(/href="[^"]*"/g) ?? []).some((h) => h.includes(file.key))).toBe(false);
     const fetched = await post(`/files/${file.file.id}/download`, admin, { key: file.key });
     expect(fetched.status).toBe(200);
     expectCleanHtml(body);
