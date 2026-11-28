@@ -296,6 +296,7 @@ describe("MCP OAuth", () => {
       "delete_file",
       "get_download",
       "list_files",
+      "school_history",
       "school_list",
       "school_read",
       "school_send",
