@@ -1,0 +1,43 @@
+name: usage
+
+# Daily check of yesterday's Cloudflare usage against the free-plan allowances. Opens (or comments
+# on) a "usage-alert" issue when a meter reaches 60%, so the owner knows when to move to Workers Paid.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - id: usage
+        run: node scripts/usage-check.mjs
+        env:
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      - if: steps.usage.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.usage.outputs.report }}
+        run: |
+          gh label create usage-alert --color D93F0B --description "Cloudflare usage near the free allowance" --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --label usage-alert --state open --json number -q '.[0].number')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "$REPORT"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label usage-alert --title "Cloudflare usage is near the free allowance" --body "$REPORT"
+          fi
