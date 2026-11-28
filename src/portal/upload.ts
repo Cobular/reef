@@ -41,7 +41,7 @@ ${fieldError("lifetime-error", null)}
 <div class="field">
 <label for="share_with">Share with <span class="opt">(optional)</span></label>
 <input type="text" id="share_with" name="share_with" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="share-hint share_with-error">
-<p class="hint" id="share-hint">GitHub logins, separated by spaces or commas. Each person must have signed in to Reef once. You can always download your own files.</p>
+<p class="hint" id="share-hint">GitHub logins or Reef display names, separated by spaces or commas. Each person must have signed in to Reef once. You can always download your own files.</p>
 ${fieldError("share_with-error", null)}
 </div>
 <div class="field">

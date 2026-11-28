@@ -121,13 +121,26 @@ export function csrfField(token: string): Raw {
 }
 
 /** A GitHub avatar over an initial, so a blocked or slow image still leaves something. */
-export function avatar(account: { id: number; login: string }, small = false): Raw {
+/**
+ * An account's face: its GitHub avatar over its initial. An account with a display name
+ * (`aliased`) gets the initial only, since the avatar would show who it is on GitHub.
+ */
+export function avatar(
+  account: { id: number; login: string; aliased?: boolean },
+  small = false,
+): Raw {
   const px = small ? 44 : 64;
-  return html`<span class="avatar${small ? " sm" : ""}" title="${account.login}" aria-hidden="true">${account.login.slice(0, 1)}<img src="https://avatars.githubusercontent.com/u/${String(account.id)}?s=${String(px)}&amp;v=4" alt="" width="${String(px / 2)}" height="${String(px / 2)}" loading="lazy" decoding="async"></span>`;
+  const face = account.aliased
+    ? ""
+    : html`<img src="https://avatars.githubusercontent.com/u/${String(account.id)}?s=${String(px)}&amp;v=4" alt="" width="${String(px / 2)}" height="${String(px / 2)}" loading="lazy" decoding="async">`;
+  return html`<span class="avatar${small ? " sm" : ""}" title="${account.login}" aria-hidden="true">${account.login.slice(0, 1)}${face}</span>`;
 }
 
 /** A row of overlapping avatars; screen readers get the logins as text. */
-export function faces(accounts: { id: number; login: string }[], label: string): Raw {
+export function faces(
+  accounts: { id: number; login: string; aliased?: boolean }[],
+  label: string,
+): Raw {
   if (accounts.length === 0) return html``;
   return html`<ul class="faces" aria-label="${label}">${accounts.map(
     (a) => html`<li>${avatar(a, true)}<span class="sr-only">${a.login}</span></li>`,
@@ -137,7 +150,7 @@ export function faces(accounts: { id: number; login: string }[], label: string):
 /** Avatars with their logins beside them; past `limit`, a "+N more" naming the rest. */
 /** Share-list avatars with logins; the viewer is listed first, as "you". */
 export function sharedWith(
-  accounts: { id: number; login: string }[],
+  accounts: { id: number; login: string; aliased?: boolean }[],
   viewerId: number,
   limit = Infinity,
 ): Raw {

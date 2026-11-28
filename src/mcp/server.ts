@@ -67,7 +67,7 @@ const createUploadInput = memoJsonSchema(
       .describe("How many downloads may start. Omit for no limit."),
     share_with: logins
       .optional()
-      .describe("GitHub logins of Reef accounts that may download it, at most 10."),
+      .describe("Reef accounts that may download it, by GitHub login or display name, at most 10."),
     key: z
       .string()
       .optional()
@@ -79,8 +79,8 @@ const noInput = memoJsonSchema(z.object({}));
 const shareInput = memoJsonSchema(
   z.object({
     file_id: fileId,
-    add: logins.optional().describe("GitHub logins to add."),
-    remove: logins.optional().describe("GitHub logins to remove."),
+    add: logins.optional().describe("Accounts to add, by GitHub login or display name."),
+    remove: logins.optional().describe("Accounts to remove, by GitHub login or display name."),
   }),
 );
 

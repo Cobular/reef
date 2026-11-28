@@ -137,7 +137,7 @@ ${fieldError("kind-error", e.kind ?? null)}
 <input type="text" id="school-logins" name="logins" value="${state.logins ?? ""}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="logins-hint logins-error"${
     e.logins ? html` aria-invalid="true"` : ""
   }>
-<p class="hint" id="logins-hint">GitHub logins, separated by spaces or commas. They join once they accept.</p>
+<p class="hint" id="logins-hint">GitHub logins or Reef display names, separated by spaces or commas. They join once they accept.</p>
 ${fieldError("logins-error", e.logins ?? null)}
 </div>
 <button type="submit" class="btn primary">Create school</button>
@@ -201,7 +201,9 @@ export async function createSchoolFromPortal(p: SignedIn): Promise<Response> {
     return fail({ kind: "Choose who’s in the school." });
   const logins = kind === "solo" ? [] : loginList(loginsText);
   if (kind === "pair" && logins.length !== 1)
-    return fail({ logins: "A pair school has exactly one other person. Enter one GitHub login." });
+    return fail({
+      logins: "A pair school has exactly one other person. Enter one GitHub login or display name.",
+    });
   try {
     const created = await createSchool(
       schoolsContext(p.env, p.now),

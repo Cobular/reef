@@ -1,14 +1,24 @@
-import { deleteAccount, type GrantRevoker } from "../account/service";
+import { changeDisplayName, deleteAccount, type GrantRevoker } from "../account/service";
 import { SESSION_COOKIE, signupMode } from "../config";
 import { getUser } from "../files/repo";
 import { html } from "../lib/html";
 import { clearCookie } from "../lib/http";
 import { csrfField, fieldError, timeEl, utcText } from "./components";
-import { formCsrfOk, readForm, type SignedIn } from "./context";
+import { formCsrfOk, readForm, type SignedIn, seeOther } from "./context";
 import { forbidden, render } from "./layout";
 
-/** GET /account, and the re-render when the typed login doesn't match. */
-export async function accountPage(p: SignedIn, error: string | null = null, status = 200) {
+interface NameState {
+  value: string;
+  error: string;
+}
+
+/** GET /account, and the re-render when a form on it is refused. */
+export async function accountPage(
+  p: SignedIn,
+  error: string | null = null,
+  status = 200,
+  nameState: NameState | null = null,
+) {
   const user = await getUser(p.env.DB, p.user.userId);
   const created = user
     ? html`${timeEl(user.created_at, p.now)} <span class="muted small">(${utcText(user.created_at)})</span>`
@@ -18,7 +28,7 @@ export async function accountPage(p: SignedIn, error: string | null = null, stat
       ? ""
       : " Reef is invite-only right now, so you’d need a new invite.";
   const body = html`<div class="head"><div><h1>Your account</h1>
-<p>Your Reef account is your GitHub account; Reef keeps only the login and numeric ID.</p></div></div>
+<p>Your Reef account is your GitHub account; Reef keeps only the login and numeric ID, and the display name if you choose one.</p></div></div>
 <div class="narrow stack">
 <section class="card" aria-labelledby="account-title">
 <h2 id="account-title">Account</h2>
@@ -26,6 +36,23 @@ export async function accountPage(p: SignedIn, error: string | null = null, stat
 <dt>GitHub login</dt><dd class="mono">${p.user.login}</dd>
 <dt>Created</dt><dd>${created}</dd>
 </dl>
+</section>
+<section class="card" aria-labelledby="name-title">
+<h2 id="name-title">Display name</h2>
+<p>Reef shows this name instead of your GitHub login to other members and their agent sessions: in school messages and member lists, on share lists, and in the portal, where your GitHub picture is hidden too. People can still invite you or share files with you by either name.</p>
+<form method="post" action="/account/name">${csrfField(p.csrf)}
+<div class="field">
+<label for="display-name">Display name</label>
+<input type="text" id="display-name" name="name" maxlength="39" autocomplete="off" autocapitalize="off" spellcheck="false" value="${
+    nameState?.value ?? user?.display_name ?? ""
+  }" aria-describedby="display-name-hint display-name-error"${
+    nameState ? html` aria-invalid="true"` : ""
+  }>
+<p class="hint" id="display-name-hint">Letters, digits, hyphens, underscores and dots, up to 39. Leave it empty to show your GitHub login.</p>
+${fieldError("display-name-error", nameState?.error ?? null)}
+</div>
+<button type="submit" class="btn">Save display name</button>
+</form>
 </section>
 <section class="card" aria-labelledby="delete-title">
 <h2 id="delete-title">Delete your account</h2>
@@ -50,6 +77,22 @@ ${fieldError("confirm-error", error)}
 </section>
 </div>`;
   return render(p, { title: "Your account", section: "account", status }, body);
+}
+
+/** POST /account/name: sets or clears the display name. */
+export async function displayNameFromPortal(p: SignedIn): Promise<Response> {
+  const form = await readForm(p.request);
+  if (!form || !formCsrfOk(p, form)) return forbidden(p);
+  const value = String(form.get("name") ?? "");
+  const result = await changeDisplayName(p.env.DB, p.user.userId, value);
+  if (!result.ok) return accountPage(p, null, 400, { value, error: result.error });
+  return seeOther(
+    p,
+    "/account",
+    result.name === null
+      ? "Display name cleared. Reef shows your GitHub login again."
+      : `Saved. Reef now shows you as ${result.name}.`,
+  );
 }
 
 /**

@@ -3,8 +3,24 @@ export type FileState = "pending" | "ready" | "deleted";
 export interface UserRow {
   id: number;
   login: string;
+  /** The name Reef shows instead of the login, if the account chose one. */
+  display_name: string | null;
   created_at: number;
   banned: number;
+}
+
+/**
+ * SQL for the name Reef shows for the account in table alias `u`: its display name if it chose
+ * one, else its GitHub login. Columns that carry it keep "login" in their names (sender_login,
+ * owner_login, ...) for brevity; their values are this shown name.
+ */
+export function shownName(u: string): string {
+  return `COALESCE(${u}.display_name, ${u}.login)`;
+}
+
+/** SQL that is 1 when the account in alias `u` chose a display name (so hide its GitHub face). */
+export function aliased(u: string): string {
+  return `(${u}.display_name IS NOT NULL)`;
 }
 
 export interface FileRow {
@@ -22,7 +38,9 @@ export interface FileRow {
 }
 
 export interface ListedFile extends FileRow {
+  /** The owner's shown name (display name or login). */
   owner_login: string;
+  owner_aliased: number;
 }
 
 // ---- users ---------------------------------------------------------------------------------
@@ -36,14 +54,72 @@ export async function isActiveUser(db: D1Database, id: number): Promise<boolean>
   return user !== null && user.banned === 0;
 }
 
-export async function findUsersByLogins(db: D1Database, logins: string[]): Promise<UserRow[]> {
-  if (logins.length === 0) return [];
-  const marks = logins.map(() => "?").join(",");
+/**
+ * The accounts named, by GitHub login or display name (case-insensitive). A name that is one
+ * account's login and another's display name resolves to the login: logins are canonical.
+ * Returns each named account once, keyed by the name as given (lowercased).
+ */
+export async function findUsersByNames(
+  db: D1Database,
+  names: string[],
+): Promise<Map<string, UserRow>> {
+  const found = new Map<string, UserRow>();
+  if (names.length === 0) return found;
+  const marks = names.map(() => "?").join(",");
   const result = await db
-    .prepare(`SELECT * FROM users WHERE login COLLATE NOCASE IN (${marks})`)
-    .bind(...logins)
+    .prepare(
+      `SELECT * FROM users WHERE login COLLATE NOCASE IN (${marks})
+         OR display_name COLLATE NOCASE IN (${marks})`,
+    )
+    .bind(...names, ...names)
     .all<UserRow>();
-  return result.results;
+  for (const name of names) {
+    const key = name.toLowerCase();
+    const byLogin = result.results.find((u) => u.login.toLowerCase() === key);
+    const byName = result.results.find((u) => u.display_name?.toLowerCase() === key);
+    const user = byLogin ?? byName;
+    if (user) found.set(key, user);
+  }
+  return found;
+}
+
+/**
+ * Sets (or with null, clears) the account's display name. Returns false, writing nothing, when
+ * the name is another account's login or display name (case-insensitive).
+ */
+export async function setDisplayName(
+  db: D1Database,
+  id: number,
+  name: string | null,
+): Promise<boolean> {
+  try {
+    const result = await db
+      .prepare(
+        `UPDATE users SET display_name = ?2 WHERE id = ?1 AND (?2 IS NULL OR NOT EXISTS (
+           SELECT 1 FROM users WHERE id != ?1
+             AND (login = ?2 COLLATE NOCASE OR display_name = ?2 COLLATE NOCASE)))`,
+      )
+      .bind(id, name)
+      .run();
+    return result.meta.changes > 0;
+  } catch (error) {
+    // Two accounts claiming the same name at once: the unique index refuses the second.
+    if (String(error).includes("UNIQUE")) return false;
+    throw error;
+  }
+}
+
+/**
+ * A login takes precedence over a display name: clears any other account's display name equal
+ * to it. Run when an account is created or its login changes.
+ */
+export async function releaseDisplayName(db: D1Database, id: number, login: string) {
+  await db
+    .prepare(
+      "UPDATE users SET display_name = NULL WHERE display_name = ?2 COLLATE NOCASE AND id != ?1",
+    )
+    .bind(id, login)
+    .run();
 }
 
 export async function isInvited(db: D1Database, login: string): Promise<boolean> {
@@ -178,8 +254,8 @@ export async function canAccess(db: D1Database, file: FileRow, userId: number): 
 export async function shareLogins(db: D1Database, fileId: string): Promise<string[]> {
   const result = await db
     .prepare(
-      `SELECT u.login FROM file_shares s JOIN users u ON u.id = s.user_id
-       WHERE s.file_id = ? ORDER BY u.login COLLATE NOCASE`,
+      `SELECT ${shownName("u")} AS login FROM file_shares s JOIN users u ON u.id = s.user_id
+       WHERE s.file_id = ? ORDER BY 1 COLLATE NOCASE`,
     )
     .bind(fileId)
     .all<{ login: string }>();
@@ -215,7 +291,9 @@ const VISIBLE_FILES = `(f.owner_id = ?1 OR f.id IN (SELECT file_id FROM file_sha
 export interface ShareRow {
   file_id: string;
   user_id: number;
+  /** The account's shown name (display name or login). */
   login: string;
+  aliased: number;
 }
 
 /**
@@ -230,16 +308,18 @@ export async function listFilesFor(
   const [files, shares] = await db.batch<ListedFile | ShareRow>([
     db
       .prepare(
-        `SELECT f.*, u.login AS owner_login FROM files f JOIN users u ON u.id = f.owner_id
+        `SELECT f.*, ${shownName("u")} AS owner_login, ${aliased("u")} AS owner_aliased
+           FROM files f JOIN users u ON u.id = f.owner_id
          WHERE ${VISIBLE_FILES}
          ORDER BY f.created_at DESC LIMIT 200`,
       )
       .bind(userId, goneSince),
     db
       .prepare(
-        `SELECT s.file_id, s.user_id, u.login FROM file_shares s JOIN users u ON u.id = s.user_id
+        `SELECT s.file_id, s.user_id, ${shownName("u")} AS login, ${aliased("u")} AS aliased
+           FROM file_shares s JOIN users u ON u.id = s.user_id
          WHERE s.file_id IN (SELECT f.id FROM files f WHERE ${VISIBLE_FILES})
-         ORDER BY u.login COLLATE NOCASE`,
+         ORDER BY 3 COLLATE NOCASE`,
       )
       .bind(userId, goneSince),
   ]);
@@ -257,14 +337,16 @@ export async function fileWithShares(
   const [file, shares] = await db.batch<ListedFile | ShareRow>([
     db
       .prepare(
-        `SELECT f.*, u.login AS owner_login FROM files f JOIN users u ON u.id = f.owner_id
+        `SELECT f.*, ${shownName("u")} AS owner_login, ${aliased("u")} AS owner_aliased
+           FROM files f JOIN users u ON u.id = f.owner_id
          WHERE f.id = ?`,
       )
       .bind(fileId),
     db
       .prepare(
-        `SELECT s.file_id, s.user_id, u.login FROM file_shares s JOIN users u ON u.id = s.user_id
-         WHERE s.file_id = ? ORDER BY u.login COLLATE NOCASE`,
+        `SELECT s.file_id, s.user_id, ${shownName("u")} AS login, ${aliased("u")} AS aliased
+           FROM file_shares s JOIN users u ON u.id = s.user_id
+         WHERE s.file_id = ? ORDER BY 3 COLLATE NOCASE`,
       )
       .bind(fileId),
   ]);

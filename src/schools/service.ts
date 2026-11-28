@@ -1,6 +1,6 @@
 import { DAY_MS, SCHOOL_LIMITS, SESSION_TYPES, type SessionType, utcDay } from "../config";
 import { isValidKey } from "../files/key";
-import { findUsersByLogins, type UserRow } from "../files/repo";
+import { findUsersByNames, type UserRow } from "../files/repo";
 import { ReefError, uniqueLogins } from "../files/service";
 import { utf8 } from "../lib/base64";
 import { randomId } from "../lib/crypto";
@@ -103,22 +103,27 @@ async function acceptedMembershipOf(ctx: SchoolsContext, actor: number, schoolId
   return row;
 }
 
-/** Resolves logins to active accounts other than the actor; refuses unknown or banned ones. */
+/**
+ * Resolves account names (GitHub logins or display names) to active accounts other than the
+ * actor; refuses unknown or banned ones.
+ */
 async function resolveInvitees(
   ctx: SchoolsContext,
   actor: number,
   logins: string[],
 ): Promise<UserRow[]> {
   const wanted = uniqueLogins(logins);
-  const users = (await findUsersByLogins(ctx.db, wanted)).filter((u) => u.banned === 0);
-  const found = new Set(users.map((u) => u.login.toLowerCase()));
-  const missing = wanted.filter((l) => !found.has(l.toLowerCase()));
+  const found = await findUsersByNames(ctx.db, wanted);
+  const missing = wanted.filter((n) => {
+    const user = found.get(n.toLowerCase());
+    return user?.banned !== 0;
+  });
   if (missing.length > 0)
     throw new ReefError(
       400,
       `Not Reef accounts: ${missing.join(", ")}. Only people who have signed in to Reef can be invited.`,
     );
-  const byId = new Map(users.filter((u) => u.id !== actor).map((u) => [u.id, u]));
+  const byId = new Map([...found.values()].filter((u) => u.id !== actor).map((u) => [u.id, u]));
   return [...byId.values()];
 }
 
@@ -184,7 +189,7 @@ export async function createSchool(
     ...invitees.map((u) => ({ userId: u.id, accepted: false })),
   ]);
   logEvent("school.created", { school: school.id, user: actor, kind, invited: invitees.length });
-  return { school, invited: invitees.map((u) => u.login) };
+  return { school, invited: invitees.map((u) => u.display_name ?? u.login) };
 }
 
 /** Invites more accounts. Any accepted member may invite, up to the school's capacity. */
@@ -212,7 +217,7 @@ export async function inviteToSchool(
     fresh.map((u) => u.id),
   );
   logEvent("school.invited", { school: school.id, user: actor, invited: fresh.length });
-  return { invited: fresh.map((u) => u.login) };
+  return { invited: fresh.map((u) => u.display_name ?? u.login) };
 }
 
 export async function acceptInvite(ctx: SchoolsContext, actor: number, schoolId: string) {
@@ -342,7 +347,8 @@ export interface SchoolListing {
   accepted: boolean;
   /** The actor's own session types taking part. */
   sessionTypes: SessionType[];
-  members: { id: number; login: string; accepted: boolean }[];
+  /** `login` is the shown name; `aliased` hides the GitHub avatar. */
+  members: { id: number; login: string; aliased: boolean; accepted: boolean }[];
   lastMessageAt: number | null;
   /**
    * The furthest seq the actor has read to: as a person in the portal, or with any of their
@@ -363,7 +369,12 @@ export async function listSchoolsFor(ctx: SchoolsContext, actor: number): Promis
       list = [];
       bySchool.set(m.school_id, list);
     }
-    list.push({ id: m.user_id, login: m.login, accepted: m.accepted === 1 });
+    list.push({
+      id: m.user_id,
+      login: m.login,
+      aliased: m.aliased === 1,
+      accepted: m.accepted === 1,
+    });
   }
   return schools.map((s) => ({
     id: s.id,
@@ -396,7 +407,8 @@ export interface AttachmentView {
 export interface MessageView {
   seq: number;
   createdAt: number;
-  sender: { id: number; login: string };
+  /** `login` is the sender's shown name (display name or GitHub login). */
+  sender: { id: number; login: string; aliased: boolean };
   /** The sending session's type, or "person" for a message written in the Reef portal. */
   sessionType: SenderType;
   product: string;
@@ -480,7 +492,7 @@ function messageView(row: MessageRow, actor: number, session?: SessionKey): Mess
   return {
     seq: row.seq,
     createdAt: row.created_at,
-    sender: { id: row.sender_id, login: row.sender_login },
+    sender: { id: row.sender_id, login: row.sender_login, aliased: row.sender_aliased === 1 },
     sessionType: row.session_type,
     product: row.product,
     label: row.label,

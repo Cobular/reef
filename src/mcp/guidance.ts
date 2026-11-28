@@ -46,7 +46,7 @@ export const LIST_FILES_DESCRIPTION =
   "List the Reef files you own or are shared on, with minutes remaining and downloads left, plus files that expired or were deleted in the last 24 hours. Keys are never listed: Reef does not keep them.";
 
 export const SHARE_FILE_DESCRIPTION =
-  "Add or remove GitHub logins on a file's share list. Only the file's owner can do this. Only people who have signed in to Reef can be added; a share list holds at most 10 accounts. Returns the new share list.";
+  "Add or remove accounts on a file's share list, by GitHub login or Reef display name. Only the file's owner can do this. Only people who have signed in to Reef can be added; a share list holds at most 10 accounts. Returns the new share list.";
 
 export const DELETE_FILE_DESCRIPTION =
   "Delete a Reef file now, before it expires. The owner or anyone on its share list can delete it.";

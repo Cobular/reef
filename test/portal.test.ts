@@ -574,6 +574,23 @@ describe("schools", () => {
     expect(read.messages.map((m) => m.text)).toEqual(["one", "two", "three", "mine"]);
   });
 
+  it("sets a display name on the account page, and hides the GitHub face behind it", async () => {
+    const ctx = schoolsContext(workerEnv);
+    const school = await createSchool(ctx, bob.userId, "dm", "pair", ["Cobular"]);
+    await acceptInvite(ctx, admin.userId, school.school.id);
+    const refused = await post("/account/name", bob, { name: "Cobular" });
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain("That name is taken");
+    const saved = await followFlash(await post("/account/name", bob, { name: "reef-bob" }), bob);
+    expect(saved).toContain("Saved. Reef now shows you as reef-bob.");
+    expect(saved).toContain('value="reef-bob"');
+
+    const page = await (await get(`/schools/${school.school.id}`, admin)).text();
+    expect(page).toContain("reef-bob");
+    expect(page).not.toContain(`avatars.githubusercontent.com/u/${bob.userId}?`);
+    expect(page).toContain(`avatars.githubusercontent.com/u/${admin.userId}?`);
+  });
+
   it("lists schools as stretched links that say who is in them", async () => {
     const ctx = schoolsContext(workerEnv);
     const pair = await createSchool(ctx, bob.userId, "dm", "pair", ["Cobular"]);
