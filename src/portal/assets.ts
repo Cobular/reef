@@ -3,7 +3,7 @@
  * caching. ASSET_VERSION is part of every URL: change it whenever any of these strings change
  * (test/portal.test.ts checks it against a hash of the content and prints the new value).
  */
-export const ASSET_VERSION = "ba2fe89406";
+export const ASSET_VERSION = "62e4f2a3d0";
 
 export const CSS = `:root{--bg:#F6F3ED;--surface:#FFFFFF;--ink:#0E2A3A;--muted:#5A6A72;--line:#E2DCD1;--sea:#1D6A86;--coral:#C4492F;--ok:#276F4F;--warn:#915D10;--danger:#B42318;--on-solid:#FFFFFF;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1A22;--surface:#10242E;--ink:#E6EDF0;--muted:#93A5AD;--line:#1F3744;--sea:#6CC3DD;--coral:#F0806A;--ok:#5CC79A;--warn:#E0A84A;--danger:#F17C70;--on-solid:#0B1A22}}
@@ -173,6 +173,7 @@ input.short{max-width:10rem}
 .chip,.file-chip{display:inline-flex;align-items:center;gap:5px;padding:0 8px;border:1px solid var(--line);border-radius:999px;font-size:13px;line-height:20px;color:var(--muted);white-space:nowrap}
 .tag{font-size:13px;color:var(--muted)}
 .attach{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;padding:0}
+.attach li{display:inline-flex;align-items:center;gap:2px}
 .file-chip{padding:4px 10px;border-radius:8px;background:var(--bg);color:var(--ink);text-decoration:none;white-space:normal}
 a.file-chip:hover{border-color:var(--sea)}
 .file-chip.gone{color:var(--muted)}

@@ -540,6 +540,15 @@ describe("schools", () => {
     expect(body).toContain('<li class="msg other"');
     expect(body).not.toContain("another account");
     expect(body).not.toContain("</span>}");
+    // The attachment's key rides in a one-click download form, never in a link.
+    expect(body).toContain(`<form method="post" action="/files/${file.file.id}/download">`);
+    expect(body).toContain(`<input type="hidden" name="key" value="${file.key}">`);
+    expect(body).not.toContain(`href="/files/${file.file.id}?`);
+    expect(body).not.toMatch(
+      new RegExp(`href="[^"]*${file.key.slice(0, 12).replace(/[+/]/g, "\\$&")}`),
+    );
+    const fetched = await post(`/files/${file.file.id}/download`, admin, { key: file.key });
+    expect(fetched.status).toBe(200);
     expectCleanHtml(body);
 
     // Nothing read yet: the divider sits before the first message.
