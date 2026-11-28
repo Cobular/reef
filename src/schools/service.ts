@@ -344,9 +344,12 @@ export interface SchoolListing {
   sessionTypes: SessionType[];
   members: { id: number; login: string; accepted: boolean }[];
   lastMessageAt: number | null;
-  /** The furthest seq any of the actor's sessions has read to; 0 if none has read any. */
+  /**
+   * The furthest seq the actor has read to: as a person in the portal, or with any of their
+   * sessions. 0 if neither has read any.
+   */
   readSeq: number;
-  /** Messages after the furthest point any of the actor's sessions has read to. */
+  /** Messages after readSeq. */
   unread: number;
 }
 
@@ -528,6 +531,20 @@ export async function transcript(
     nextBefore: rows.length > page.length ? (page[page.length - 1]?.seq ?? null) : null,
     replyTarget: also ? messageView(also, actor) : null,
   };
+}
+
+/**
+ * Records that the actor has seen a school's messages up to `seq` in the portal, so its unread
+ * badge clears. Moves only the person's own position: every session keeps its own, so an agent
+ * still sees these messages as unread until it reads them.
+ */
+export async function markSeenInPortal(
+  ctx: SchoolsContext,
+  actor: number,
+  schoolId: string,
+  seq: number,
+): Promise<void> {
+  await repo.movePortalReadPosition(ctx.db, schoolId, actor, seq);
 }
 
 /** The longest prefix of `rows` within the page text budget, never fewer than one row. */

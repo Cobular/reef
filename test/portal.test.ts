@@ -530,13 +530,48 @@ describe("schools", () => {
     const divider = after.indexOf('class="divider"');
     expect(divider).toBeGreaterThan(after.indexOf("second"));
     expect(divider).toBeLessThan(after.indexOf("third"));
-    // The portal never moves read positions.
+    // Viewing marks the messages seen for the person, so the next view has no divider...
     const again = await (await get(`/schools/${school.school.id}`, admin)).text();
-    expect(again.indexOf('class="divider"')).toBeLessThan(again.indexOf("third"));
-    await readMessages(ctx, admin.userId, adminSession, school.school.id);
-    expect(await (await get(`/schools/${school.school.id}`, admin)).text()).not.toContain(
-      'class="divider"',
-    );
+    expect(again).not.toContain('class="divider"');
+    // ...but not for their sessions: the agent still has "third" to read.
+    const read = await readMessages(ctx, admin.userId, adminSession, school.school.id);
+    expect(read.messages.map((m) => m.text)).toEqual(["third"]);
+  });
+
+  it("clears a school's unread badge once the person views it, without touching sessions", async () => {
+    const ctx = schoolsContext(workerEnv);
+    const school = await createSchool(ctx, bob.userId, "dm", "pair", ["Cobular"]);
+    const id = school.school.id;
+    await acceptInvite(ctx, admin.userId, id);
+    const bobSession = (await joinSession(ctx, bob.userId, "local_coding", "laptop", "claude-code"))
+      .handle;
+    // Cobular has a session, but it never reads this school (say, a private one).
+    const adminSession = (await joinSession(ctx, admin.userId, "chat", "web", "claude-ai")).handle;
+    await sendMessage(ctx, bob.userId, bobSession, id, "one");
+    await sendMessage(ctx, bob.userId, bobSession, id, "two");
+    const badge = (page: string) => page.match(/class="badge" title="(\d+) unread"/)?.[1] ?? null;
+    expect(badge(await (await get("/schools", admin)).text())).toBe("2");
+
+    // Viewing the school in the portal clears the badge, and reloading writes nothing new.
+    await get(`/schools/${id}`, admin);
+    expect(badge(await (await get("/schools", admin)).text())).toBeNull();
+    await get(`/schools/${id}`, admin);
+    expect((await listSchoolsFor(ctx, admin.userId))[0]?.readSeq).toBe(2);
+
+    // An earlier page doesn't mark newer messages seen.
+    await sendMessage(ctx, bob.userId, bobSession, id, "three");
+    await get(`/schools/${id}?before=2`, admin);
+    expect(badge(await (await get("/schools", admin)).text())).toBe("1");
+
+    // The person's own portal message doesn't leave the badge up once they're back on the page.
+    await get(`/schools/${id}`, admin);
+    const sent = await post(`/schools/${id}/send`, admin, { text: "mine" });
+    await followFlash(sent, admin);
+    expect(badge(await (await get("/schools", admin)).text())).toBeNull();
+
+    // The session's own position is untouched: it still has everything to read.
+    const read = await readMessages(ctx, admin.userId, adminSession, id);
+    expect(read.messages.map((m) => m.text)).toEqual(["one", "two", "three", "mine"]);
   });
 
   it("lists schools as stretched links that say who is in them", async () => {
